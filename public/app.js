@@ -693,6 +693,9 @@ function renderWalletTable(wallets, withActions) {
           <th>Asset</th>
           <th>Exchange</th>
           <th>CID</th>
+          <th>Total Received</th>
+          <th>Originally USD</th>
+          <th>Live USD</th>
           <th>Issued</th>
           <th>First Access</th>
           <th>Status</th>
@@ -702,6 +705,7 @@ function renderWalletTable(wallets, withActions) {
       <tbody>
         ${wallets.map(wallet => {
           const addressText = withActions ? walletSuffix(wallet.address) : wallet.address;
+          const totals = walletTotals(wallet);
           return `
             <tr class="${wallet.id === app.selectedWalletId ? 'selected-row' : ''}">
               <td>${escapeHtml(wallet.name)}</td>
@@ -709,6 +713,9 @@ function renderWalletTable(wallets, withActions) {
               <td>${escapeHtml(assetLabel(wallet))}</td>
               <td>${escapeHtml(wallet.exchange || '-')}</td>
               <td>${escapeHtml(wallet.cid || '-')}</td>
+              <td>${escapeHtml(cryptoAmount(totals.totalCrypto, wallet.crypto))}</td>
+              <td>${money(totals.originalUsd)}</td>
+              <td>${money(totals.currentUsd)}</td>
               <td>${escapeHtml(shortDate(wallet.issuedToClientAt))}</td>
               <td>${escapeHtml(shortDate(wallet.firstAccessAt))}</td>
               <td>${statusPill(wallet.status)}</td>

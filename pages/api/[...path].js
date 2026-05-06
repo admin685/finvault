@@ -1294,7 +1294,10 @@ async function routeRequest(db, req, path, method, ip) {
   if (!user) return { status: 401, persist: false, body: { ok: false, error: "Authentication required." } };
 
   let result;
-  if (path === "state" && method === "GET") result = { ok: true, state: buildState(db, user) };
+  if (path === "state" && method === "GET") {
+    await refreshLivePrices(db);
+    result = { ok: true, state: buildState(db, user) };
+  }
   else if (path === "prices" && method === "GET") result = { ok: true, prices: db.priceCache || {} };
   else if (path === "prices/refresh" && method === "POST") result = { ok: true, prices: await refreshLivePrices(db, true) };
   else if (path === "requests" && method === "POST") {
