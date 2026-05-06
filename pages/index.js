@@ -20,6 +20,7 @@ export default function Home({ shell, assetVersion }) {
       </Head>
       <div dangerouslySetInnerHTML={{ __html: shell }} />
       <Script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" strategy="beforeInteractive" />
+      <Script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" strategy="afterInteractive" />
       <Script src={`/app.js?v=${assetVersion}`} strategy="afterInteractive" />
     </>
   );

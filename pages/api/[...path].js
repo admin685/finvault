@@ -12,6 +12,13 @@ class SafetyError extends Error {
 }
 
 const PRICE_ASSETS = ["USDT", "BTC", "ETH", "SOL", "XRP"];
+const ASSET_NETWORKS = {
+  USDT: ["TRC20", "ERC20", "BEP20"],
+  BTC: ["Bitcoin"],
+  ETH: ["ERC20"],
+  SOL: ["Solana"],
+  XRP: ["Ripple"]
+};
 const BINANCE_SYMBOLS = {
   BTC: "BTCUSDT",
   ETH: "ETHUSDT",
@@ -58,6 +65,32 @@ function parseOriginalAmount(value) {
   return roundCrypto(toNumber(value, 0));
 }
 
+function assetCatalog() {
+  return Object.entries(ASSET_NETWORKS).flatMap(([cryptoName, networks]) =>
+    networks.map(network => ({ crypto: cryptoName, network, label: `${cryptoName}-${network}` }))
+  );
+}
+
+function assetAllowed(cryptoName, network) {
+  return (ASSET_NETWORKS[cryptoName] || []).includes(network);
+}
+
+function assertAllowedAsset(cryptoName, network) {
+  if (!assetAllowed(cryptoName, network)) throw new Error(`Unsupported asset: ${cryptoName}-${network}.`);
+}
+
+function normalizedRow(row = {}) {
+  return Object.fromEntries(
+    Object.entries(row).map(([key, value]) => [String(key || "").trim().toLowerCase(), value])
+  );
+}
+
+function parseAssetText(assetText) {
+  const clean = String(assetText || "").trim().toUpperCase();
+  if (!clean) return null;
+  return assetCatalog().find(item => item.label.toUpperCase() === clean) || null;
+}
+
 function defaultDb() {
   const createdAt = now();
   return {
@@ -102,21 +135,21 @@ function defaultDb() {
       { cid: "773104", name: "George Hall", brand: "Prime Desk", createdAt }
     ],
     wallets: [
-      { id: "w-usdt-trx-071", name: "USDT-TRX-071", address: "TJ7x94jK5wG5RXqLeN9bKqKqD1vB7V9aK2", crypto: "USDT", network: "TRC20", status: "busy", cid: "884019", exchange: "Binance", requestId: "REQ-2398", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-usdt-trx-071", name: "USDT-TRX-071", address: "TJ7x94jK5wG5RXqLeN9bKqKqD1vB7V9aK2", crypto: "USDT", network: "TRC20", status: "frozen", cid: "884019", exchange: "Binance", requestId: "REQ-2398", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2398", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-eth-erc-022", name: "ETH-ERC-022", address: "0x7f2b2f621e9d51c03a9f3f0f5d4f1c8b7a0192c1", crypto: "ETH", network: "ERC20", status: "busy", cid: "773104", exchange: "Client's Wallet", requestId: "REQ-2399", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-usdt-trx-118", name: "USDT-TRX-118", address: "TP9m44V7cbQqfR9snQw3vRy7LxxHqAKxQ", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-usdt-trx-119", name: "USDT-TRX-119", address: "TQ8m44V7cbQqfR9snQw3vRy7LxxHqALp9", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-btc-034", name: "BTC-AU-034", address: "bc1q52t7nw0uv5q9x2p7r8kdllgk4x7u4319pk", crypto: "BTC", network: "Bitcoin", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-eth-erc-188", name: "ETH-ERC-188", address: "0xb9e917a099cf67183f6b904d7b6e2c873f9217a0", crypto: "ETH", network: "ERC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-sol-044", name: "SOL-044", address: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszxj3aGkP", crypto: "SOL", network: "Solana", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-xrp-009", name: "XRP-RPL-009", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "blocked", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
+      { id: "w-xrp-009", name: "XRP-RPL-009", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", frozenAt: "", frozenByRequestId: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
     ],
     assignments: [
       { id: "as-001", cid: "884019", clientName: "Mark Stevens", brand: "Goldy AU", room: "M", agentId: "user-daniel", walletId: "w-usdt-trx-071", crypto: "USDT", network: "TRC20", exchange: "Binance", depositUsd: 8400, requestId: "REQ-2398", assignedAt: createdAt },
       { id: "as-002", cid: "773104", clientName: "George Hall", brand: "Prime Desk", room: "T2", agentId: "user-michael", walletId: "w-eth-erc-022", crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", depositUsd: 3250, requestId: "REQ-2399", assignedAt: createdAt }
     ],
     requests: [
-      { id: "REQ-2398", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Mark Stevens", cid: "884019", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: false, crypto: "USDT", network: "TRC20", exchange: "Binance", originalAmount: "", depositUsd: 8400, notes: "", walletId: "w-usdt-trx-071", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
+      { id: "REQ-2398", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Mark Stevens", cid: "884019", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: true, crypto: "USDT", network: "TRC20", exchange: "Binance", originalAmount: "", depositUsd: 8400, notes: "", walletId: "w-usdt-trx-071", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
       { id: "REQ-2399", status: "instant", date: today(), agentId: "user-michael", createdBy: "user-michael", clientName: "George Hall", cid: "773104", brand: "Prime Desk", room: "T2", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", originalAmount: "", depositUsd: 3250, notes: "", walletId: "w-eth-erc-022", rejectReason: "", approvedBy: "", createdAt, updatedAt: createdAt }
     ],
     priceCache: {
@@ -147,13 +180,29 @@ function normalizeDb(db) {
   db.priceCache.USDT = { usd: 1, updatedAt: db.priceCache.USDT?.updatedAt || now(), source: "fixed" };
   db.wallets.forEach(wallet => {
     wallet.address = String(wallet.address || "").trim();
+    if (wallet.status === "blocked") {
+      wallet.status = "free";
+      wallet.cid = "";
+      wallet.exchange = "";
+      wallet.requestId = "";
+    }
     const assignment = db.assignments.find(item =>
       item.walletId === wallet.id && (item.requestId === wallet.requestId || item.cid === wallet.cid)
     ) || db.assignments.find(item => item.walletId === wallet.id);
-    const wasIssued = ["busy", "archived"].includes(wallet.status) && (wallet.cid || assignment);
+    const wasIssued = ["busy", "frozen", "archived"].includes(wallet.status) && (wallet.cid || assignment);
     const issuedFallback = wasIssued ? (assignment?.assignedAt || wallet.createdAt || "") : "";
     if (wallet.issuedToClientAt === undefined) wallet.issuedToClientAt = issuedFallback;
     if (wallet.firstAccessAt === undefined) wallet.firstAccessAt = issuedFallback;
+    if (wallet.frozenAt === undefined) wallet.frozenAt = "";
+    if (wallet.frozenByRequestId === undefined) wallet.frozenByRequestId = "";
+    const frozenRequest = db.requests.find(request =>
+      request.walletId === wallet.id && request.keepInWallet && ["approved", "instant"].includes(request.status)
+    );
+    if (wallet.status === "busy" && frozenRequest) {
+      wallet.status = "frozen";
+      wallet.frozenAt = wallet.frozenAt || frozenRequest.updatedAt || frozenRequest.createdAt || "";
+      wallet.frozenByRequestId = wallet.frozenByRequestId || frozenRequest.id;
+    }
   });
   db.walletTransactions.forEach(tx => {
     tx.amountCrypto = roundCrypto(tx.amountCrypto);
@@ -262,8 +311,8 @@ function assertDbSafety(db) {
     if (wallet.status === "reserved" && !wallet.requestId) {
       throw new SafetyError(`Wallet safety check failed: reserved wallet ${wallet.name || wallet.id} has no request.`);
     }
-    if (wallet.status === "busy" && !wallet.cid) {
-      throw new SafetyError(`Wallet safety check failed: busy wallet ${wallet.name || wallet.id} has no CID.`);
+    if (["busy", "frozen"].includes(wallet.status) && !wallet.cid) {
+      throw new SafetyError(`Wallet safety check failed: ${wallet.status} wallet ${wallet.name || wallet.id} has no CID.`);
     }
   }
 
@@ -295,8 +344,8 @@ function assertDbSafety(db) {
         throw new SafetyError(`Wallet safety check failed: reserved wallet ${wallet.name || wallet.id} has no matching pending request.`);
       }
     }
-    if (wallet.status === "busy" && !(db.assignments || []).some(assignment => assignment.walletId === wallet.id)) {
-      throw new SafetyError(`Wallet safety check failed: busy wallet ${wallet.name || wallet.id} has no assignment record.`);
+    if (["busy", "frozen"].includes(wallet.status) && !(db.assignments || []).some(assignment => assignment.walletId === wallet.id)) {
+      throw new SafetyError(`Wallet safety check failed: ${wallet.status} wallet ${wallet.name || wallet.id} has no assignment record.`);
     }
   }
 
@@ -304,7 +353,7 @@ function assertDbSafety(db) {
     if (!assignment.walletId) throw new SafetyError("Wallet safety check failed: assignment without wallet.");
     const wallet = db.wallets.find(item => item.id === assignment.walletId);
     if (!wallet) throw new SafetyError(`Wallet safety check failed: assignment points to missing wallet ${assignment.walletId}.`);
-    if (!["busy", "archived"].includes(wallet.status)) {
+    if (!["busy", "frozen", "archived"].includes(wallet.status)) {
       throw new SafetyError(`Wallet safety check failed: assignment points to wallet ${wallet.name || wallet.id} with status ${wallet.status}.`);
     }
 
@@ -315,8 +364,8 @@ function assertDbSafety(db) {
     }
     assignmentByWallet.set(assignment.walletId, { key, assignment });
 
-    if (wallet.status === "busy" && (wallet.cid !== assignment.cid || wallet.exchange !== assignment.exchange)) {
-      throw new SafetyError(`Wallet safety check failed: busy wallet ${wallet.name || wallet.id} does not match its assignment.`);
+    if (["busy", "frozen"].includes(wallet.status) && (wallet.cid !== assignment.cid || wallet.exchange !== assignment.exchange)) {
+      throw new SafetyError(`Wallet safety check failed: ${wallet.status} wallet ${wallet.name || wallet.id} does not match its assignment.`);
     }
   }
 
@@ -337,6 +386,13 @@ function markWalletIssued(wallet, stamp = now()) {
   if (!wallet) return;
   wallet.issuedToClientAt = stamp;
   recordWalletFirstAccess(wallet, stamp);
+}
+
+function markWalletFrozen(wallet, request, stamp = now()) {
+  if (!wallet || !request?.keepInWallet) return;
+  wallet.status = "frozen";
+  wallet.frozenAt = wallet.frozenAt || stamp;
+  wallet.frozenByRequestId = wallet.frozenByRequestId || request.id;
 }
 
 function getPool() {
@@ -805,7 +861,7 @@ function findExistingAssignment(db, cid, cryptoName, network, exchange) {
   return db.assignments.find(item => {
     if (item.cid !== cid || item.crypto !== cryptoName || item.network !== network || item.exchange !== exchange) return false;
     const wallet = db.wallets.find(walletItem => walletItem.id === item.walletId);
-    return wallet?.status === "busy" && wallet.cid === cid && wallet.exchange === exchange;
+    return ["busy", "frozen"].includes(wallet?.status) && wallet.cid === cid && wallet.exchange === exchange;
   });
 }
 
@@ -851,6 +907,7 @@ function buildState(db, user) {
     teams: db.teams,
     brands: db.brands,
     exchanges: db.exchanges,
+    assets: assetCatalog(),
     wallets,
     walletTransactions,
     walletScans,
@@ -872,7 +929,8 @@ function createRequest(db, body, user, ip) {
   const cryptoName = String(body.crypto || "").trim();
   const network = String(body.network || "").trim();
   const exchange = String(body.exchange || "").trim();
-  if (!cid || !cryptoName || !network || !exchange) throw new Error("CID, cryptocurrency, network and exchange are required.");
+  if (!cid || !cryptoName || !network || !exchange) throw new Error("CID, asset and exchange are required.");
+  assertAllowedAsset(cryptoName, network);
 
   const requestCreatedAt = now();
   const requestId = `REQ-${db.settings.nextRequestNumber}`;
@@ -888,7 +946,7 @@ function createRequest(db, body, user, ip) {
     const wallet = findFreeWallet(db, cryptoName, network);
     if (!wallet) {
       addAlert(db, "danger", `${cryptoName} ${network} empty`, `Agent ${agent.fullName} requested ${cryptoName} ${network} for CID ${cid}, but no free wallet exists.`, ["finance", "admin"]);
-      addAudit(db, user, "request_blocked_no_wallet", `No free wallet for ${cryptoName} ${network}`, { cid, requestId, ip });
+      addAudit(db, user, "request_no_wallet_available", `No free wallet for ${cryptoName} ${network}`, { cid, requestId, ip });
       return { ok: false, code: "NO_WALLET", message: `No free wallet for ${cryptoName} ${network}. Finance manager and admin were notified.` };
     }
     wallet.status = "reserved";
@@ -933,6 +991,7 @@ function createRequest(db, body, user, ip) {
   if (status === "instant") {
     if (wallet && !wallet.issuedToClientAt) wallet.issuedToClientAt = existing?.assignedAt || requestCreatedAt;
     recordWalletFirstAccess(wallet, requestCreatedAt);
+    markWalletFrozen(wallet, request, requestCreatedAt);
     recordTransactionFromRequest(db, request, wallet, requestCreatedAt);
     addAudit(db, user, "wallet_returned_instantly", "Existing wallet returned for CID + crypto + network + exchange.", { cid, walletId, requestId, ip });
   }
@@ -952,10 +1011,11 @@ function approveRequest(db, requestId, user, ip) {
   if (!wallet || wallet.status !== "reserved" || wallet.requestId !== request.id) throw new Error("Wallet is not reserved for this request.");
 
   const approvedAt = now();
-  wallet.status = "busy";
+  wallet.status = request.keepInWallet ? "frozen" : "busy";
   wallet.cid = request.cid;
   wallet.exchange = request.exchange;
   markWalletIssued(wallet, approvedAt);
+  markWalletFrozen(wallet, request, approvedAt);
   request.status = "approved";
   request.approvedBy = user.id;
   request.updatedAt = approvedAt;
@@ -1034,6 +1094,7 @@ function addWallet(db, body, user, ip) {
   if (!canManageWallets(user)) throw new Error("Only finance manager or admin can add wallets.");
   const address = String(body.address || "").trim();
   if (!address) throw new Error("Wallet address is required.");
+  assertAllowedAsset(String(body.crypto || "").trim(), String(body.network || "").trim());
   const addressKey = walletAddressKey(address);
   if (db.wallets.some(item => walletAddressKey(item.address) === addressKey)) throw new Error("Wallet address already exists.");
   const name = String(body.name || "").trim() || `${body.crypto}-${body.network}-${db.settings.nextWalletNumber++}`;
@@ -1049,6 +1110,8 @@ function addWallet(db, body, user, ip) {
     requestId: "",
     issuedToClientAt: "",
     firstAccessAt: "",
+    frozenAt: "",
+    frozenByRequestId: "",
     archivedReason: "",
     archivedBy: "",
     archivedAt: "",
@@ -1057,6 +1120,77 @@ function addWallet(db, body, user, ip) {
   db.wallets.push(wallet);
   addAudit(db, user, "wallet_added", `Wallet added to pool: ${name}`, { walletId: wallet.id, ip });
   return { ok: true, wallet };
+}
+
+function bulkAddWallets(db, body, user, ip) {
+  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can add wallets.");
+  const rows = Array.isArray(body.wallets) ? body.wallets : [];
+  if (!rows.length) throw new Error("Bulk upload file has no wallet rows.");
+
+  const knownAddresses = new Set(db.wallets.map(wallet => walletAddressKey(wallet.address)));
+  const batchAddresses = new Set();
+  const errors = [];
+  const prepared = [];
+
+  rows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    const mapped = normalizedRow(row);
+    const address = String(mapped.address || mapped.wallet || mapped["wallet address"] || "").trim();
+    const assetText = String(mapped.asset || "").trim();
+    const parsedAsset = parseAssetText(assetText);
+    const cryptoName = String(mapped.crypto || parsedAsset?.crypto || "").trim();
+    const network = String(mapped.network || parsedAsset?.network || "").trim();
+    const name = String(mapped.name || "").trim();
+
+    if (!address) {
+      errors.push(`Row ${rowNumber}: Address is required.`);
+      return;
+    }
+    const addressKey = walletAddressKey(address);
+    if (knownAddresses.has(addressKey)) {
+      errors.push(`Row ${rowNumber}: Wallet address already exists.`);
+      return;
+    }
+    if (batchAddresses.has(addressKey)) {
+      errors.push(`Row ${rowNumber}: Duplicate address inside file.`);
+      return;
+    }
+    if (!assetAllowed(cryptoName, network)) {
+      errors.push(`Row ${rowNumber}: Unsupported asset ${cryptoName}-${network}.`);
+      return;
+    }
+    batchAddresses.add(addressKey);
+    prepared.push({ name, address, crypto: cryptoName, network });
+  });
+
+  const added = prepared.map(row => {
+    const name = row.name || `${row.crypto}-${row.network}-${db.settings.nextWalletNumber++}`;
+    const wallet = {
+      id: `w-${crypto.randomUUID().slice(0, 10)}`,
+      name,
+      address: row.address,
+      crypto: row.crypto,
+      network: row.network,
+      status: "free",
+      cid: "",
+      exchange: "",
+      requestId: "",
+      issuedToClientAt: "",
+      firstAccessAt: "",
+      frozenAt: "",
+      frozenByRequestId: "",
+      archivedReason: "",
+      archivedBy: "",
+      archivedAt: "",
+      createdAt: now()
+    };
+    db.wallets.push(wallet);
+    knownAddresses.add(walletAddressKey(wallet.address));
+    return wallet;
+  });
+
+  addAudit(db, user, "wallets_bulk_added", `Bulk wallet upload: ${added.length} added, ${errors.length} skipped.`, { ip });
+  return { ok: true, added, errors };
 }
 
 function archiveWallet(db, walletId, reason, user, ip) {
@@ -1311,6 +1445,7 @@ async function routeRequest(db, req, path, method, ip) {
   else if (path.match(/^requests\/[^/]+\/reject$/) && method === "POST") result = rejectRequest(db, path.split("/")[1], req.body?.reason || "", user, ip);
   else if (path.match(/^requests\/[^/]+\/change-wallet$/) && method === "POST") result = changeRequestWallet(db, path.split("/")[1], user, ip);
   else if (path === "wallets" && method === "POST") result = addWallet(db, req.body || {}, user, ip);
+  else if (path === "wallets/bulk" && method === "POST") result = bulkAddWallets(db, req.body || {}, user, ip);
   else if (path.match(/^wallets\/[^/]+\/scan$/) && method === "POST") result = await scanWallet(db, path.split("/")[1], user, ip);
   else if (path.match(/^wallets\/[^/]+\/archive$/) && method === "POST") result = archiveWallet(db, path.split("/")[1], req.body?.reason || "", user, ip);
   else if (path === "client-search" && method === "POST") result = clientSearch(db, req.body?.query || "", user, ip);

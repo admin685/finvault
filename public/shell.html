@@ -98,7 +98,7 @@
         <div class="notice-row">
           <div class="notice info">
             <strong>CID check</strong>
-            <span>System checks CID + crypto + network + exchange.</span>
+            <span>System checks CID + asset + exchange.</span>
           </div>
           <div class="notice warning">
             <strong>Reserved</strong>
@@ -150,19 +150,11 @@
             </select>
           </label>
           <label>
-            Cryptocurrency
-            <select name="crypto" id="request-crypto" required>
-              <option>USDT</option>
-              <option>BTC</option>
-              <option>ETH</option>
-              <option>SOL</option>
-              <option>XRP</option>
-            </select>
+            Asset
+            <select name="asset" id="request-asset" required></select>
           </label>
-          <label>
-            Network
-            <select name="network" id="request-network" required></select>
-          </label>
+          <input type="hidden" name="crypto">
+          <input type="hidden" name="network">
           <label>
             Exchange
             <select name="exchange" id="request-exchange" required></select>

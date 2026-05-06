@@ -21,7 +21,7 @@ const viewTitles = {
   screen: ['Agent Screen', 'Live ranking by daily, monthly, WD and target'],
   queue: ['Approval Queue', 'Reserved wallets waiting for supervisor decision'],
   clients: ['CID Search', 'Search by CID, client name or wallet address'],
-  wallets: ['Wallet Pool', 'Free, reserved, busy, blocked and archived wallets'],
+  wallets: ['Wallet Pool', 'Free, reserved, busy, frozen and archived wallets'],
   history: ['Journal / History', 'Excel-compatible monthly journal'],
   audit: ['Audit Log', 'Every important action is recorded'],
   admin: ['Admin', 'Users, teams, targets, IP whitelist and backups'],
@@ -105,6 +105,35 @@ function assetLabel(item) {
   return [crypto, network].filter(Boolean).join('-') || '-';
 }
 
+function assetOptions() {
+  if (app.state?.assets?.length) return app.state.assets;
+  return Object.entries(networkOptions).flatMap(([crypto, networks]) =>
+    networks.map(network => ({ crypto, network, label: `${crypto}-${network}` }))
+  );
+}
+
+function renderAssetOptions(selected = '') {
+  return assetOptions().map(asset => {
+    const label = asset.label || assetLabel(asset);
+    return `<option value="${escapeHtml(label)}" ${selected === label ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function splitAssetValue(value) {
+  const asset = assetOptions().find(item => (item.label || assetLabel(item)) === value);
+  if (asset) return { crypto: asset.crypto, network: asset.network };
+  const [crypto, ...networkParts] = String(value || '').split('-');
+  return { crypto: crypto || '', network: networkParts.join('-') };
+}
+
+function syncAssetInputs(form) {
+  const assetInput = $('[name="asset"]', form);
+  if (!assetInput) return;
+  const { crypto, network } = splitAssetValue(assetInput.value);
+  $('[name="crypto"]', form).value = crypto;
+  $('[name="network"]', form).value = network;
+}
+
 function priceUsd(crypto) {
   if (crypto === 'USDT') return 1;
   return Number(app.state?.priceCache?.[crypto]?.usd || 0);
@@ -129,6 +158,36 @@ function walletTotals(wallet) {
   const originalUsd = transactions.reduce((sum, tx) => sum + Number(tx.originalUsd || 0), 0);
   const currentUsd = totalCrypto * priceUsd(wallet.crypto);
   return { transactions, totalCrypto, originalUsd, currentUsd };
+}
+
+function walletRoom(wallet) {
+  const request = (app.state?.requests || [])
+    .slice()
+    .reverse()
+    .find(item => item.walletId === wallet.id);
+  const assignment = (app.state?.assignments || [])
+    .slice()
+    .reverse()
+    .find(item => item.walletId === wallet.id);
+  return request?.room || assignment?.room || '-';
+}
+
+function frozenRoomRows() {
+  const grouped = new Map();
+  (app.state?.wallets || []).filter(wallet => wallet.status === 'frozen').forEach(wallet => {
+    const room = walletRoom(wallet);
+    const totals = walletTotals(wallet);
+    const row = grouped.get(room) || { room, wallets: 0, originalUsd: 0, currentUsd: 0, assets: new Map() };
+    row.wallets += 1;
+    row.originalUsd += totals.originalUsd;
+    row.currentUsd += totals.currentUsd;
+    const asset = assetLabel(wallet);
+    const assetRow = row.assets.get(asset) || { crypto: wallet.crypto, totalCrypto: 0 };
+    assetRow.totalCrypto += totals.totalCrypto;
+    row.assets.set(asset, assetRow);
+    grouped.set(room, row);
+  });
+  return Array.from(grouped.values()).sort((a, b) => a.room.localeCompare(b.room));
 }
 
 function icon(name) {
@@ -589,6 +648,37 @@ function renderLivePrices() {
   </div>`;
 }
 
+function renderFrozenRooms() {
+  const rows = frozenRoomRows();
+  if (!rows.length) {
+    return panel('Frozen Wallets by Room', '<div class="empty">No frozen wallets yet.</div>');
+  }
+  return panel('Frozen Wallets by Room', `
+    <table>
+      <thead>
+        <tr>
+          <th>Room</th>
+          <th>Frozen wallets</th>
+          <th>Assets</th>
+          <th>Originally USD</th>
+          <th>Live USD</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(row => `
+          <tr>
+            <td><strong>${escapeHtml(row.room)}</strong></td>
+            <td>${row.wallets}</td>
+            <td>${Array.from(row.assets.entries()).map(([asset, value]) => `${escapeHtml(asset)}: ${escapeHtml(cryptoAmount(value.totalCrypto, value.crypto))}`).join('<br>')}</td>
+            <td>${money(row.originalUsd)}</td>
+            <td>${money(row.currentUsd)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `);
+}
+
 function renderWallets() {
   if (!canManageWallets()) {
     return '<div class="panel"><div class="empty">Wallet pool is available to finance manager and admin.</div></div>';
@@ -607,8 +697,9 @@ function renderWallets() {
           <div class="form-grid" style="grid-template-columns:1fr">
             <label>Name<input name="name" placeholder="Optional"></label>
             <label>Address<input name="address" required placeholder="Wallet address"></label>
-            <label>Crypto<select name="crypto" id="wallet-crypto"><option>USDT</option><option>BTC</option><option>ETH</option><option>SOL</option><option>XRP</option></select></label>
-            <label>Network<select name="network" id="wallet-network"></select></label>
+            <label>Asset<select name="asset" id="wallet-asset" required>${renderAssetOptions()}</select></label>
+            <input type="hidden" name="crypto">
+            <input type="hidden" name="network">
           </div>
           <div class="modal-footer">
             <button class="btn primary" type="submit">${icon('plus')}Add Wallet</button>
@@ -616,8 +707,32 @@ function renderWallets() {
         </form>
       `)}
     </div>
+    ${renderFrozenRooms()}
+    ${renderBulkWalletUpload()}
     ${selectedWallet ? renderWalletDetail(selectedWallet) : ''}
   `;
+}
+
+function renderBulkWalletUpload() {
+  return panel('Bulk Wallet Upload', `
+    <div class="panel-body">
+      <div class="bulk-upload-grid">
+        <div>
+          <div class="profile-line"><span>Required columns</span><strong>Name, Address, Asset</strong></div>
+          <div class="profile-line"><span>Asset examples</span><strong>${escapeHtml(assetOptions().map(item => item.label || assetLabel(item)).join(', '))}</strong></div>
+          <div class="profile-line"><span>Status after upload</span><strong>free</strong></div>
+        </div>
+        <div>
+          <label>Excel or CSV file<input id="bulk-wallet-file" type="file" accept=".xlsx,.xls,.csv"></label>
+          <div class="row-actions" style="margin-top:12px">
+            <button class="btn" id="download-wallet-template" type="button">${icon('download')}Template</button>
+            <button class="btn primary" id="upload-wallet-bulk" type="button">${icon('upload')}Upload Wallets</button>
+          </div>
+        </div>
+      </div>
+      <div id="bulk-wallet-result" class="scan-note"></div>
+    </div>
+  `);
 }
 
 function renderWalletDetail(wallet) {
@@ -798,7 +913,7 @@ function renderAdmin() {
   const managers = users.filter(user => ['supervisor', 'finance', 'admin'].includes(user.role) && user.active);
   const roleOptions = role => ['agent', 'supervisor', 'finance', 'admin'].map(item => `<option value="${item}" ${role === item ? 'selected' : ''}>${roleLabel(item)}</option>`).join('');
   const teamOptions = team => [...teams.map(item => item.name), 'Finance', 'Ops'].filter((item, index, arr) => arr.indexOf(item) === index).map(item => `<option value="${escapeHtml(item)}" ${team === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
-  const activeOptions = active => `<option value="true" ${active ? 'selected' : ''}>Active</option><option value="false" ${!active ? 'selected' : ''}>Blocked</option>`;
+  const activeOptions = active => `<option value="true" ${active ? 'selected' : ''}>Active</option><option value="false" ${!active ? 'selected' : ''}>Inactive</option>`;
   const managerOptions = managerId => managers.map(manager => `<option value="${escapeHtml(manager.id)}" ${manager.id === managerId ? 'selected' : ''}>${escapeHtml(manager.fullName)} · ${roleLabel(manager.role)}</option>`).join('');
 
   return `
@@ -992,10 +1107,12 @@ function renderFilters(scope) {
       </select>
       <select data-filter="status">
         <option value="">Status</option>
-        ${['pending', 'approved', 'rejected', 'instant', 'free', 'busy', 'reserved', 'archived'].map(status => `<option ${filter.status === status ? 'selected' : ''}>${status}</option>`).join('')}
+        ${['pending', 'approved', 'rejected', 'instant', 'free', 'busy', 'frozen', 'reserved', 'archived'].map(status => `<option ${filter.status === status ? 'selected' : ''}>${status}</option>`).join('')}
       </select>
-      <select data-filter="crypto"><option value="">Crypto</option>${['USDT', 'BTC', 'ETH', 'SOL', 'XRP'].map(item => `<option ${filter.crypto === item ? 'selected' : ''}>${item}</option>`).join('')}</select>
-      <select data-filter="network"><option value="">Network</option>${['TRC20', 'ERC20', 'BEP20', 'Bitcoin', 'Solana', 'Ripple'].map(item => `<option ${filter.network === item ? 'selected' : ''}>${item}</option>`).join('')}</select>
+      <select data-filter="asset"><option value="">Asset</option>${assetOptions().map(asset => {
+        const label = asset.label || assetLabel(asset);
+        return `<option value="${escapeHtml(label)}" ${filter.asset === label ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+      }).join('')}</select>
       <select data-filter="room"><option value="">Room</option>${(app.state.teams || []).map(team => `<option ${filter.room === team.name ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('')}</select>
       <select data-filter="brand"><option value="">Brand</option>${(app.state.brands || []).map(brand => `<option ${filter.brand === brand.name ? 'selected' : ''}>${escapeHtml(brand.name)}</option>`).join('')}</select>
       <input data-filter="amount" placeholder="Amount" value="${escapeHtml(filter.amount || '')}">
@@ -1011,8 +1128,7 @@ function filteredRequests(rows) {
       && matches(row.cid, filter.cid)
       && matches(row.exchange, filter.exchange)
       && matches(row.status, filter.status)
-      && matches(row.crypto, filter.crypto)
-      && matches(row.network, filter.network)
+      && matches(assetLabel(row), filter.asset)
       && matches(row.room, filter.room)
       && matches(row.brand, filter.brand)
       && matches(String(row.depositUsd), filter.amount);
@@ -1021,14 +1137,14 @@ function filteredRequests(rows) {
 
 function filteredAudit(rows) {
   const filter = app.filters.audit || {};
+  const assetText = String(filter.asset || '');
   return rows.filter(row => {
     return matches(row.time, filter.date)
       && matches(row.userName, filter.agent)
       && matches(row.cid, filter.cid)
       && matches(row.action, filter.status)
       && matches(row.details, filter.exchange)
-      && matches(row.details, filter.crypto)
-      && matches(row.details, filter.network)
+      && (!assetText || matches(row.details, assetText) || matches(row.details, assetText.replaceAll('-', ' ')))
       && matches(row.details, filter.room)
       && matches(row.details, filter.brand)
       && matches(row.details, filter.amount);
@@ -1184,8 +1300,8 @@ function bindViewEvents() {
     if (event.key === 'Enter') runClientSearch();
   });
   $('#add-wallet-form')?.addEventListener('submit', submitWallet);
-  $('#wallet-crypto')?.addEventListener('change', () => setNetworkOptions('wallet-crypto', 'wallet-network'));
-  if ($('#wallet-network')) setNetworkOptions('wallet-crypto', 'wallet-network');
+  $('#wallet-asset')?.addEventListener('change', event => syncAssetInputs(event.currentTarget.form));
+  if ($('#wallet-asset')) syncAssetInputs($('#add-wallet-form'));
   $('#add-user-form')?.addEventListener('submit', submitUser);
   $('#add-brand-form')?.addEventListener('submit', submitBrand);
   $('#add-exchange-form')?.addEventListener('submit', submitExchange);
@@ -1193,6 +1309,8 @@ function bindViewEvents() {
   $('#security-form')?.addEventListener('submit', submitSecurity);
   $('#manual-backup-btn')?.addEventListener('click', createBackup);
   $('#export-csv-btn')?.addEventListener('click', exportLegacyCsv);
+  $('#download-wallet-template')?.addEventListener('click', downloadWalletTemplate);
+  $('#upload-wallet-bulk')?.addEventListener('click', uploadBulkWallets);
 }
 
 function updateFilter(scope, input) {
@@ -1235,14 +1353,129 @@ async function scanWallet(walletId) {
 
 async function submitWallet(event) {
   event.preventDefault();
-  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const form = event.currentTarget;
+  syncAssetInputs(form);
+  const payload = Object.fromEntries(new FormData(form).entries());
+  delete payload.asset;
   try {
     await api('/api/wallets', { method: 'POST', body: JSON.stringify(payload) });
     toast('Wallet added', payload.name || payload.address);
-    event.currentTarget.reset();
+    form.reset();
+    syncAssetInputs(form);
     await loadState();
   } catch (error) {
     toast('Wallet not added', error.message);
+  }
+}
+
+function downloadTextFile(filename, text, type = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadWalletTemplate() {
+  const exampleAsset = assetOptions()[0]?.label || 'USDT-TRC20';
+  const csv = [
+    ['Name', 'Address', 'Asset'],
+    [`${exampleAsset}-001`, 'Paste wallet address here', exampleAsset],
+  ].map(row => row.map(csvCell).join(',')).join('\r\n');
+  downloadTextFile('finvault-wallet-upload-template.csv', csv);
+}
+
+function normalizeBulkRow(row) {
+  const mapped = {};
+  Object.entries(row || {}).forEach(([key, value]) => {
+    mapped[String(key || '').trim().toLowerCase()] = value;
+  });
+  return {
+    name: mapped.name || '',
+    address: mapped.address || mapped.wallet || mapped['wallet address'] || '',
+    asset: mapped.asset || '',
+    crypto: mapped.crypto || '',
+    network: mapped.network || '',
+  };
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let current = '';
+  let row = [];
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === ',' && !quoted) {
+      row.push(current);
+      current = '';
+    } else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && next === '\n') index += 1;
+      row.push(current);
+      if (row.some(cell => String(cell).trim())) rows.push(row);
+      row = [];
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  row.push(current);
+  if (row.some(cell => String(cell).trim())) rows.push(row);
+  const headers = (rows.shift() || []).map(item => String(item || '').trim());
+  return rows.map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] || ''])));
+}
+
+function readFileAsArrayBuffer(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(file);
+  });
+}
+
+async function parseWalletUploadFile(file) {
+  const extension = file.name.split('.').pop().toLowerCase();
+  if (extension === 'csv') {
+    return parseCsv(await readFileAsText(file)).map(normalizeBulkRow);
+  }
+  if (!window.XLSX) throw new Error('Excel parser is still loading. Try again in a few seconds or upload CSV.');
+  const workbook = window.XLSX.read(await readFileAsArrayBuffer(file), { type: 'array' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return window.XLSX.utils.sheet_to_json(sheet, { defval: '' }).map(normalizeBulkRow);
+}
+
+async function uploadBulkWallets() {
+  const file = $('#bulk-wallet-file')?.files?.[0];
+  if (!file) return toast('Choose file first', 'Upload Excel or CSV wallet template.');
+  try {
+    const wallets = (await parseWalletUploadFile(file)).filter(row => row.address || row.asset || row.crypto || row.network);
+    const result = await api('/api/wallets/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ wallets }),
+    });
+    $('#bulk-wallet-result').textContent = `${result.added?.length || 0} added. ${(result.errors || []).length} skipped. ${(result.errors || []).slice(0, 5).join(' ')}`;
+    toast('Bulk upload complete', `${result.added?.length || 0} wallet(s) added.`);
+    await loadState();
+  } catch (error) {
+    toast('Bulk upload failed', error.message);
   }
 }
 
@@ -1385,20 +1618,16 @@ function populateRequestModal() {
   $('#request-brand').innerHTML = (app.state.brands || []).filter(item => item.active).map(brand => `<option>${escapeHtml(brand.name)}</option>`).join('');
   $('#request-room').innerHTML = (app.state.teams || []).map(team => `<option>${escapeHtml(team.name)}</option>`).join('');
   $('#request-exchange').innerHTML = (app.state.exchanges || []).filter(item => item.active).map(exchange => `<option>${escapeHtml(exchange.name)}</option>`).join('');
-  setNetworkOptions('request-crypto', 'request-network');
-}
-
-function setNetworkOptions(cryptoId, networkId) {
-  const crypto = $(`#${cryptoId}`);
-  const network = $(`#${networkId}`);
-  if (!crypto || !network) return;
-  network.innerHTML = (networkOptions[crypto.value] || []).map(item => `<option>${escapeHtml(item)}</option>`).join('');
+  $('#request-asset').innerHTML = renderAssetOptions();
+  syncAssetInputs($('#request-form'));
 }
 
 async function submitRequest(event) {
   event.preventDefault();
   const form = event.currentTarget;
+  syncAssetInputs(form);
   const payload = Object.fromEntries(new FormData(form).entries());
+  delete payload.asset;
   payload.keepInWallet = payload.keepInWallet === 'true';
   payload.depositUsd = Number(payload.depositUsd || 0);
   if (currentUser().role === 'agent') payload.agentId = currentUser().id;
@@ -1421,6 +1650,7 @@ async function submitRequest(event) {
 }
 
 async function checkCid() {
+  syncAssetInputs($('#request-form'));
   const cid = $('#request-form [name="cid"]').value.trim();
   if (!cid) return toast('Enter CID first');
   const result = await api('/api/client-search', {
@@ -1471,7 +1701,7 @@ async function submitArchive(event) {
 function exportLegacyCsv() {
   const columns = [
     'ID', 'Agent', 'CID', "Client's name", 'Date', 'Brand', 'Room',
-    'Deposit (USD)', 'Net Deposit', 'cryptocurrency', 'Exchange',
+    'Deposit (USD)', 'Net Deposit', 'Asset', 'Exchange',
     'Original Amount', 'Wallet / Bank', 'Rate', 'Source',
     'Deposit \\ Withdraw \\ Refund', 'Wallet Name', 'Attach To', '18% Fee'
   ];
@@ -1500,13 +1730,7 @@ function exportLegacyCsv() {
     ];
   });
   const csv = [columns, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `FinVault-${app.state.settings.currentJournalMonth}-legacy.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadTextFile(`FinVault-${app.state.settings.currentJournalMonth}-legacy.csv`, csv);
 }
 
 function csvCell(value) {
@@ -1563,7 +1787,7 @@ function bootEvents() {
       if (event.target === backdrop) closeModal(backdrop.id);
     });
   });
-  $('#request-crypto').addEventListener('change', () => setNetworkOptions('request-crypto', 'request-network'));
+  $('#request-asset').addEventListener('change', event => syncAssetInputs(event.currentTarget.form));
   $('#request-form').addEventListener('submit', submitRequest);
   $('#check-cid-btn').addEventListener('click', checkCid);
   $('#reject-form').addEventListener('submit', submitReject);
