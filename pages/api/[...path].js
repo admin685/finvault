@@ -11,6 +11,14 @@ class SafetyError extends Error {
   }
 }
 
+class ApiError extends Error {
+  constructor(message, status = 400) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 const PRICE_ASSETS = ["USDT", "BTC", "ETH", "SOL", "XRP"];
 const ASSET_NETWORKS = {
   USDT: ["TRC20", "ERC20", "BEP20"],
@@ -65,6 +73,14 @@ function parseOriginalAmount(value) {
   return roundCrypto(toNumber(value, 0));
 }
 
+function isWithdrawType(type) {
+  return String(type || "").trim().toLowerCase() === "withdraw";
+}
+
+function assetAllowedForWithdraw(cryptoName) {
+  return cryptoName !== "USDT";
+}
+
 function assetCatalog() {
   return Object.entries(ASSET_NETWORKS).flatMap(([cryptoName, networks]) =>
     networks.map(network => ({ crypto: cryptoName, network, label: assetDisplayLabel(cryptoName, network) }))
@@ -116,7 +132,8 @@ function defaultDb() {
       lowWalletWarningAt: 2,
       currentJournalMonth: currentMonth(),
       excelCompatibilityMode: true,
-      priceCacheTtlSeconds: 60
+      priceCacheTtlSeconds: 60,
+      walletScanEverySeconds: 300
     },
     teams: [
       { id: "team-m", name: "M", description: "Room M", managerId: "user-supervisor" },
@@ -140,8 +157,14 @@ function defaultDb() {
       { id: "user-supervisor-t", username: "supervisor_t", password: "supervisor123", fullName: "Room T Manager", role: "supervisor", team: "T", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-supervisor-t2", username: "supervisor_t2", password: "supervisor123", fullName: "Room T2 Manager", role: "supervisor", team: "T2", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-daniel", username: "daniel", password: "agent123", fullName: "Daniel Reed", role: "agent", team: "M", active: true, monthlyTarget: 100000, brandAccess: ["All"] },
+      { id: "user-olivia", username: "olivia", password: "agent123", fullName: "Olivia Hart", role: "agent", team: "M", active: true, monthlyTarget: 90000, brandAccess: ["All"] },
+      { id: "user-ethan", username: "ethan", password: "agent123", fullName: "Ethan Cole", role: "agent", team: "M", active: true, monthlyTarget: 95000, brandAccess: ["All"] },
       { id: "user-anna", username: "anna", password: "agent123", fullName: "Anna Cohen", role: "agent", team: "T", active: true, monthlyTarget: 100000, brandAccess: ["All"] },
-      { id: "user-michael", username: "michael", password: "agent123", fullName: "Michael Stone", role: "agent", team: "T2", active: true, monthlyTarget: 100000, brandAccess: ["All"] }
+      { id: "user-mia", username: "mia", password: "agent123", fullName: "Mia Foster", role: "agent", team: "T", active: true, monthlyTarget: 90000, brandAccess: ["All"] },
+      { id: "user-lucas", username: "lucas", password: "agent123", fullName: "Lucas Grant", role: "agent", team: "T", active: true, monthlyTarget: 110000, brandAccess: ["All"] },
+      { id: "user-michael", username: "michael", password: "agent123", fullName: "Michael Stone", role: "agent", team: "T2", active: true, monthlyTarget: 100000, brandAccess: ["All"] },
+      { id: "user-ava", username: "ava", password: "agent123", fullName: "Ava Price", role: "agent", team: "T2", active: true, monthlyTarget: 90000, brandAccess: ["All"] },
+      { id: "user-james", username: "james", password: "agent123", fullName: "James Walker", role: "agent", team: "T2", active: true, monthlyTarget: 95000, brandAccess: ["All"] }
     ],
     clients: [
       { cid: "884019", name: "Mark Stevens", brand: "Goldy AU", createdAt },
@@ -205,6 +228,7 @@ function defaultDb() {
 function normalizeDb(db) {
   db.settings = db.settings || {};
   if (!db.settings.priceCacheTtlSeconds) db.settings.priceCacheTtlSeconds = 60;
+  if (!db.settings.walletScanEverySeconds) db.settings.walletScanEverySeconds = 300;
   db.wallets = db.wallets || [];
   db.assignments = db.assignments || [];
   db.requests = db.requests || [];
@@ -297,6 +321,7 @@ function addWalletTransaction(db, wallet, tx) {
 
 function recordTransactionFromRequest(db, request, wallet, stamp = now()) {
   if (!wallet || !request || !["approved", "instant"].includes(request.status)) return null;
+  if (isWithdrawType(request.type)) return null;
   const amountCrypto = amountFromRequest(db, request);
   if (amountCrypto <= 0) return null;
   const originalUsd = roundMoney(request.depositUsd || 0);
@@ -429,6 +454,10 @@ function markWalletFrozen(wallet, request, stamp = now()) {
   wallet.frozenByRequestId = wallet.frozenByRequestId || request.id;
 }
 
+function walletIssuedForMonitoring(wallet) {
+  return ["busy", "frozen"].includes(wallet?.status);
+}
+
 function getPool() {
   if (!process.env.DATABASE_URL) return null;
   if (!pool) {
@@ -531,6 +560,7 @@ async function fetchJson(url, options = {}, timeoutMs = 8000) {
 
 function priceIsFresh(price, ttlSeconds) {
   if (!price?.usd) return false;
+  if (!["fixed", "binance", "coingecko"].includes(price.source)) return false;
   const updatedMs = Date.parse(`${price.updatedAt || ""}Z`);
   return Number.isFinite(updatedMs) && Date.now() - updatedMs < Number(ttlSeconds || 60) * 1000;
 }
@@ -564,6 +594,7 @@ async function refreshLivePrices(db, force = false) {
 
   const stamp = now();
   const updates = { USDT: 1 };
+  const sources = { USDT: "fixed" };
   const results = await Promise.allSettled(
     PRICE_ASSETS
       .filter(asset => asset !== "USDT")
@@ -572,13 +603,20 @@ async function refreshLivePrices(db, force = false) {
   for (const result of results) {
     if (result.status === "fulfilled" && result.value?.[1] > 0) {
       updates[result.value[0]] = result.value[1];
+      sources[result.value[0]] = "binance";
     }
   }
 
   const missing = PRICE_ASSETS.filter(asset => !updates[asset]);
   if (missing.length) {
     try {
-      Object.assign(updates, await fetchCoinGeckoPrices());
+      const fallbackPrices = await fetchCoinGeckoPrices();
+      for (const asset of missing) {
+        if (fallbackPrices[asset] > 0) {
+          updates[asset] = fallbackPrices[asset];
+          sources[asset] = "coingecko";
+        }
+      }
     } catch {
       // Cached prices remain usable when both live providers are temporarily unavailable.
     }
@@ -590,7 +628,7 @@ async function refreshLivePrices(db, force = false) {
       db.priceCache[asset] = {
         usd: price,
         updatedAt: stamp,
-        source: asset === "USDT" ? "fixed" : (BINANCE_SYMBOLS[asset] ? "binance" : "coingecko")
+        source: sources[asset] || db.priceCache[asset]?.source || "cache"
       };
     }
   }
@@ -965,6 +1003,17 @@ function createRequest(db, body, user, ip) {
   const exchange = String(body.exchange || "").trim();
   if (!cid || !cryptoName || !network || !exchange) throw new Error("CID, asset and exchange are required.");
   assertAllowedAsset(cryptoName, network);
+  const requestType = String(body.type || "Deposit").trim() || "Deposit";
+  const cryptoAmount = parseOriginalAmount(body.originalAmount);
+  let depositUsd = roundMoney(body.depositUsd || 0);
+  if (isWithdrawType(requestType)) {
+    if (!assetAllowedForWithdraw(cryptoName)) {
+      throw new ApiError("Withdraw requests cannot use USDT. Choose BTC, ETH, SOL or XRP.", 400);
+    }
+    if (cryptoAmount <= 0) throw new ApiError("Withdraw requests must include the amount in the selected crypto.", 400);
+    const price = livePriceUsd(db, cryptoName);
+    depositUsd = price > 0 ? roundMoney(cryptoAmount * price) : 0;
+  }
 
   const requestCreatedAt = now();
   const requestId = `REQ-${db.settings.nextRequestNumber}`;
@@ -1005,13 +1054,13 @@ function createRequest(db, body, user, ip) {
     cid,
     brand: body.brand || "",
     room: body.room || agent.team || "",
-    type: body.type || "Deposit",
+    type: requestType,
     keepInWallet: Boolean(body.keepInWallet),
     crypto: cryptoName,
     network,
     exchange,
     originalAmount: body.originalAmount || "",
-    depositUsd: Number(body.depositUsd || 0),
+    depositUsd,
     notes: body.notes || "",
     walletId,
     rejectReason: "",
@@ -1241,12 +1290,23 @@ function archiveWallet(db, walletId, reason, user, ip) {
   return { ok: true, wallet };
 }
 
-async function scanWallet(db, walletId, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can scan wallets.");
-  const wallet = db.wallets.find(item => item.id === walletId);
-  if (!wallet) throw new Error("Wallet not found.");
-  await refreshLivePrices(db);
+function latestWalletScan(db, walletId) {
+  return (db.walletScans || [])
+    .filter(scan => scan.walletId === walletId)
+    .sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt)))[0] || null;
+}
 
+function walletScanIsDue(db, wallet, force = false) {
+  if (force) return true;
+  const latest = latestWalletScan(db, wallet.id);
+  if (!latest?.scannedAt) return true;
+  const latestMs = Date.parse(`${latest.scannedAt}Z`);
+  if (!Number.isFinite(latestMs)) return true;
+  const scanEveryMs = Number(db.settings?.walletScanEverySeconds || 300) * 1000;
+  return Date.now() - latestMs >= scanEveryMs;
+}
+
+async function runWalletScan(db, wallet, user, ip) {
   const scanStartedAt = now();
   const result = await fetchIncomingTransfers(wallet);
   const added = [];
@@ -1274,6 +1334,58 @@ async function scanWallet(db, walletId, user, ip) {
   db.walletScans.push(scan);
   addAudit(db, user, "wallet_scanned", scan.message, { cid: wallet.cid, walletId: wallet.id, requestId: wallet.requestId, ip });
   return { ok: true, scan, added, transactions: db.walletTransactions.filter(item => item.walletId === wallet.id) };
+}
+
+async function scanWallet(db, walletId, user, ip) {
+  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can scan wallets.");
+  const wallet = db.wallets.find(item => item.id === walletId);
+  if (!wallet) throw new Error("Wallet not found.");
+  if (!walletIssuedForMonitoring(wallet)) {
+    throw new ApiError("Only issued wallets can be scanned. Free, reserved and archived wallets stay in the pool and are not scanned.", 400);
+  }
+  await refreshLivePrices(db);
+  return runWalletScan(db, wallet, user, ip);
+}
+
+async function scanIssuedWallets(db, body, user, ip) {
+  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can scan wallets.");
+  const force = Boolean(body?.force);
+  const issuedWallets = db.wallets.filter(walletIssuedForMonitoring);
+  await refreshLivePrices(db);
+
+  const scanned = [];
+  const skipped = [];
+  const failed = [];
+  let addedCount = 0;
+  for (const wallet of issuedWallets) {
+    if (!walletScanIsDue(db, wallet, force)) {
+      skipped.push({ walletId: wallet.id, name: wallet.name, reason: "fresh" });
+      continue;
+    }
+    try {
+      const result = await runWalletScan(db, wallet, user, ip);
+      scanned.push({ walletId: wallet.id, name: wallet.name, scan: result.scan });
+      addedCount += result.added?.length || 0;
+    } catch (error) {
+      failed.push({ walletId: wallet.id, name: wallet.name, error: error.message });
+    }
+  }
+
+  addAudit(
+    db,
+    user,
+    "issued_wallets_scanned",
+    `Issued wallet monitoring scanned ${scanned.length}, skipped ${skipped.length}, failed ${failed.length}, added ${addedCount} transaction(s).`,
+    { ip }
+  );
+  return {
+    ok: true,
+    scanned,
+    skipped,
+    failed,
+    addedCount,
+    message: `${scanned.length} issued wallet(s) scanned, ${skipped.length} fresh, ${failed.length} failed.`
+  };
 }
 
 function clientSearch(db, query, user, ip) {
@@ -1417,6 +1529,8 @@ function updateSettings(db, body, user, ip) {
   if (user.role !== "admin") throw new Error("Only admin can change system settings.");
   if (body.lowWalletWarningAt !== undefined) db.settings.lowWalletWarningAt = Number(body.lowWalletWarningAt || 0);
   if (body.backupEveryMinutes !== undefined) db.settings.backupEveryMinutes = Number(body.backupEveryMinutes || 60);
+  if (body.priceCacheTtlSeconds !== undefined) db.settings.priceCacheTtlSeconds = Number(body.priceCacheTtlSeconds || 60);
+  if (body.walletScanEverySeconds !== undefined) db.settings.walletScanEverySeconds = Number(body.walletScanEverySeconds || 300);
   if (body.excelCompatibilityMode !== undefined) db.settings.excelCompatibilityMode = Boolean(body.excelCompatibilityMode);
   if (body.currentJournalMonth !== undefined) db.settings.currentJournalMonth = String(body.currentJournalMonth || db.settings.currentJournalMonth);
   addAudit(db, user, "system_settings_updated", "System settings updated.", { ip });
@@ -1453,6 +1567,7 @@ async function routeRequest(db, req, path, method, ip) {
     const { username = "", password = "" } = req.body || {};
     const user = getUserByLogin(db, String(username).trim().toLowerCase(), String(password));
     if (!user) return { status: 401, persist: false, body: { ok: false, error: "Invalid login or password." } };
+    await refreshLivePrices(db);
     addAudit(db, user, "login", "User logged in.", { ip });
     return { status: 200, body: { ok: true, token: signToken(user.id), state: buildState(db, user) } };
   }
@@ -1466,8 +1581,8 @@ async function routeRequest(db, req, path, method, ip) {
     await refreshLivePrices(db);
     result = { ok: true, state: buildState(db, user) };
   }
-  else if (path === "prices" && method === "GET") result = { ok: true, prices: db.priceCache || {} };
-  else if (path === "prices/refresh" && method === "POST") result = { ok: true, prices: await refreshLivePrices(db, true) };
+  else if (path === "prices" && method === "GET") result = { ok: true, prices: await refreshLivePrices(db) };
+  else if (path === "prices/refresh" && method === "POST") result = { ok: true, prices: await refreshLivePrices(db, req.body?.force !== false) };
   else if (path === "requests" && method === "POST") {
     await refreshLivePrices(db);
     result = createRequest(db, req.body || {}, user, ip);
@@ -1480,6 +1595,7 @@ async function routeRequest(db, req, path, method, ip) {
   else if (path.match(/^requests\/[^/]+\/change-wallet$/) && method === "POST") result = changeRequestWallet(db, path.split("/")[1], user, ip);
   else if (path === "wallets" && method === "POST") result = addWallet(db, req.body || {}, user, ip);
   else if (path === "wallets/bulk" && method === "POST") result = bulkAddWallets(db, req.body || {}, user, ip);
+  else if (path === "wallets/scan-issued" && method === "POST") result = await scanIssuedWallets(db, req.body || {}, user, ip);
   else if (path.match(/^wallets\/[^/]+\/scan$/) && method === "POST") result = await scanWallet(db, path.split("/")[1], user, ip);
   else if (path.match(/^wallets\/[^/]+\/archive$/) && method === "POST") result = archiveWallet(db, path.split("/")[1], req.body?.reason || "", user, ip);
   else if (path === "client-search" && method === "POST") result = clientSearch(db, req.body?.query || "", user, ip);
@@ -1516,7 +1632,7 @@ export default async function handler(req, res) {
       : await withLockedDb(db => routeRequest(db, req, path, method, ip));
     return res.status(response.status).json(response.body);
   } catch (error) {
-    const status = error instanceof SafetyError ? 409 : 500;
+    const status = error.status || (error instanceof SafetyError ? 409 : 500);
     return res.status(status).json({ ok: false, error: error.message });
   }
 }

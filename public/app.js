@@ -6,6 +6,10 @@ const app = {
   filters: {},
   selectedRoom: '',
   selectedWalletId: '',
+  priceRefreshTimer: null,
+  priceRefreshInFlight: false,
+  walletScanTimer: null,
+  walletScanInFlight: false,
 };
 
 const networkOptions = {
@@ -16,12 +20,17 @@ const networkOptions = {
   XRP: ['Ripple'],
 };
 
+const poolWalletStatuses = ['free', 'reserved'];
+const issuedWalletStatuses = ['busy', 'frozen'];
+
 const viewTitles = {
   dashboard: ['Dashboard', 'Fast work for agents, control for finance'],
   screen: ['Agent Screen', 'Live ranking by daily, monthly, WD and target'],
   queue: ['Approval Queue', 'Reserved wallets waiting for supervisor decision'],
   clients: ['CID Search', 'Search by CID, client name or wallet address'],
-  wallets: ['Wallet Pool', 'Free, reserved, busy, frozen and archived wallets'],
+  wallets: ['Wallet Pool', 'Free and reserved wallets ready to issue'],
+  monitoring: ['Issued Wallet Monitoring', 'Issued wallets only, with incoming transaction scanning'],
+  frozenFunds: ['Frozen Funds', 'Frozen money grouped by room'],
   history: ['Journal / History', 'Excel-compatible monthly journal'],
   audit: ['Audit Log', 'Every important action is recorded'],
   admin: ['Admin', 'Users, teams, targets, IP whitelist and backups'],
@@ -45,6 +54,8 @@ const navByRole = {
     ['queue', 'inbox', 'Queue'],
     ['clients', 'search', 'CID Search'],
     ['wallets', 'wallet-cards', 'Wallet Pool'],
+    ['monitoring', 'radar', 'Issued Wallets'],
+    ['frozenFunds', 'snowflake', 'Frozen Funds'],
     ['history', 'scroll-text', 'History'],
     ['audit', 'shield-check', 'Audit Log'],
     ['admin', 'settings', 'Admin'],
@@ -55,6 +66,8 @@ const navByRole = {
     ['queue', 'inbox', 'Queue'],
     ['clients', 'search', 'CID Search'],
     ['wallets', 'wallet-cards', 'Wallet Pool'],
+    ['monitoring', 'radar', 'Issued Wallets'],
+    ['frozenFunds', 'snowflake', 'Frozen Funds'],
     ['history', 'scroll-text', 'History'],
     ['audit', 'shield-check', 'Audit Log'],
     ['admin', 'settings', 'Admin'],
@@ -84,6 +97,14 @@ function money(value) {
     currency: 'USD',
     maximumFractionDigits: 0,
   });
+}
+
+function priceMoney(value) {
+  const number = Number(value || 0);
+  const fixed = Math.abs(number).toFixed(4);
+  const [whole, fraction] = fixed.split('.');
+  const wholeText = Number(whole).toLocaleString('en-US');
+  return `${number < 0 ? '-' : ''}$${wholeText} .${fraction}`;
 }
 
 function signedMoney(value) {
@@ -164,11 +185,37 @@ function assetOptions() {
   return source.map(asset => ({ ...asset, label: assetDisplayLabel(asset.crypto, asset.network) }));
 }
 
+function assetOptionLabel(asset) {
+  return asset?.label || assetLabel(asset);
+}
+
 function renderAssetOptions(selected = '') {
   return assetOptions().map(asset => {
-    const label = asset.label || assetLabel(asset);
+    const label = assetOptionLabel(asset);
     return `<option value="${escapeHtml(label)}" ${selected === label ? 'selected' : ''}>${escapeHtml(label)}</option>`;
   }).join('');
+}
+
+function requestAssetOptions(isWithdraw = false) {
+  return assetOptions().filter(asset => !isWithdraw || asset.crypto !== 'USDT');
+}
+
+function renderRequestAssetOptions(isWithdraw = false, selected = '') {
+  return requestAssetOptions(isWithdraw).map(asset => {
+    const label = assetOptionLabel(asset);
+    return `<option value="${escapeHtml(label)}" ${selected === label ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function syncRequestAssetOptions(form, isWithdraw) {
+  const assetInput = $('[name="asset"]', form);
+  if (!assetInput) return;
+  const allowed = requestAssetOptions(isWithdraw);
+  const current = assetInput.value;
+  const currentAllowed = allowed.some(asset => assetOptionLabel(asset) === current);
+  const selected = currentAllowed ? current : assetOptionLabel(allowed[0]);
+  assetInput.innerHTML = renderRequestAssetOptions(isWithdraw, selected);
+  assetInput.value = selected || '';
 }
 
 function splitAssetValue(value) {
@@ -190,6 +237,31 @@ function syncAssetInputs(form) {
   $('[name="network"]', form).value = network;
 }
 
+function updateRequestAmountMode(form = $('#request-form')) {
+  if (!form) return;
+  const isWithdraw = $('[name="type"]', form)?.value === 'Withdraw';
+  syncRequestAssetOptions(form, isWithdraw);
+  syncAssetInputs(form);
+  const crypto = $('[name="crypto"]', form)?.value || '';
+  const usdField = $('#request-usd-field');
+  const usdInput = $('#request-deposit-usd');
+  const cryptoLabel = $('#request-crypto-amount-label');
+  const cryptoInput = $('#request-original-amount');
+
+  usdField?.classList.toggle('hidden', isWithdraw);
+  if (usdInput) {
+    usdInput.required = !isWithdraw;
+    usdInput.disabled = isWithdraw;
+    if (isWithdraw) usdInput.value = '';
+  }
+  if (cryptoLabel) cryptoLabel.textContent = isWithdraw ? `Crypto Amount (${crypto || 'coin'})` : 'Original Amount';
+  if (cryptoInput) {
+    cryptoInput.required = isWithdraw;
+    cryptoInput.placeholder = isWithdraw ? `Amount in ${crypto || 'selected coin'}` : 'Optional';
+    cryptoInput.inputMode = isWithdraw ? 'decimal' : '';
+  }
+}
+
 function priceUsd(crypto) {
   if (crypto === 'USDT') return 1;
   return Number(app.state?.priceCache?.[crypto]?.usd || 0);
@@ -199,9 +271,36 @@ function priceStamp(crypto) {
   return app.state?.priceCache?.[crypto]?.updatedAt || '';
 }
 
+function priceSource(crypto) {
+  return app.state?.priceCache?.[crypto]?.source || 'cache';
+}
+
+function priceSourceLabel(source) {
+  const labels = {
+    binance: 'Binance API',
+    coingecko: 'CoinGecko API',
+    fixed: 'Fixed USD',
+    demo: 'Demo cache',
+    cache: 'Cached',
+  };
+  return labels[source] || source || 'Cached';
+}
+
 function cryptoAmount(value, crypto = '') {
   const digits = crypto === 'USDT' ? 2 : 6;
   return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits });
+}
+
+function isWithdrawRequest(request) {
+  return request?.type === 'Withdraw';
+}
+
+function requestCryptoAmountLabel(request) {
+  return `${cryptoAmount(request.originalAmount, request.crypto)} ${request.crypto || ''}`.trim();
+}
+
+function requestAmountDisplay(request) {
+  return isWithdrawRequest(request) ? requestCryptoAmountLabel(request) : money(request.depositUsd);
 }
 
 function walletTransactions(walletId) {
@@ -235,6 +334,24 @@ function walletRoom(wallet) {
     .reverse()
     .find(item => item.walletId === wallet.id);
   return request?.room || assignment?.room || '-';
+}
+
+function walletIsPool(wallet) {
+  return poolWalletStatuses.includes(wallet?.status);
+}
+
+function walletIsIssued(wallet) {
+  return issuedWalletStatuses.includes(wallet?.status);
+}
+
+function walletIsArchived(wallet) {
+  return wallet?.status === 'archived';
+}
+
+function latestWalletScan(walletId) {
+  return (app.state?.walletScans || [])
+    .filter(scan => scan.walletId === walletId)
+    .sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt)))[0] || null;
 }
 
 function frozenRoomRows() {
@@ -393,6 +510,8 @@ function renderView() {
     queue: renderQueue,
     clients: renderClients,
     wallets: renderWallets,
+    monitoring: renderIssuedWalletMonitoring,
+    frozenFunds: renderFrozenFunds,
     history: renderHistory,
     audit: renderAudit,
     admin: renderAdmin,
@@ -652,7 +771,7 @@ function renderQueue() {
             <span>${escapeHtml(userName(request.agentId))}</span>
             <span>${escapeHtml(assetLabel(request))}</span>
             <span>${escapeHtml(request.exchange)}</span>
-            <span>${money(request.depositUsd)}</span>
+            <span>${escapeHtml(requestAmountDisplay(request))}</span>
             <span>Proposed: ${escapeHtml(wallet?.name || request.walletId)}</span>
           </div>
         </div>
@@ -701,30 +820,49 @@ function renderClientResults() {
 }
 
 function renderLivePrices() {
-  const assets = ['USDT', 'BTC', 'ETH', 'SOL', 'XRP'];
-  return `<div class="price-strip">
-    ${assets.map(asset => `
-      <div class="price-tile">
-        <span>${escapeHtml(asset)}</span>
-        <strong>${money(priceUsd(asset))}</strong>
-        <small>${escapeHtml(shortDate(priceStamp(asset)))}</small>
+  const assets = ['BTC', 'ETH', 'SOL', 'XRP'];
+  const ttl = Number(app.state?.settings?.priceCacheTtlSeconds || 60);
+  return `
+    <section class="price-kpi">
+      <div class="price-kpi-head">
+        <div>
+          <span>Crypto Price KPI</span>
+          <strong>Live USD prices</strong>
+        </div>
+        <div class="price-kpi-meta">
+          <span>Backend API</span>
+          <strong>Auto ${ttl}s</strong>
+          <small>Binance primary / CoinGecko fallback</small>
+        </div>
+        <button class="btn" id="refresh-prices-btn">${icon('radar')}Refresh Prices</button>
       </div>
-    `).join('')}
-    <button class="btn" id="refresh-prices-btn">${icon('radar')}Refresh Prices</button>
-  </div>`;
+      <div class="price-strip">
+        ${assets.map(asset => `
+          <div class="price-tile">
+            <span>${escapeHtml(asset)}</span>
+            <strong>${escapeHtml(priceMoney(priceUsd(asset)))}</strong>
+            <div class="price-tile-meta">
+              <small>${escapeHtml(priceSourceLabel(priceSource(asset)))}</small>
+              <small>${escapeHtml(shortDateTime(priceStamp(asset)))}</small>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </section>
+  `;
 }
 
 function renderFrozenRooms() {
   const rows = frozenRoomRows();
   if (!rows.length) {
-    return panel('Frozen Wallets by Room', '<div class="empty">No frozen wallets yet.</div>');
+    return panel('Frozen Funds by Room', '<div class="empty">No frozen funds yet.</div>');
   }
-  return panel('Frozen Wallets by Room', `
+  return panel('Frozen Funds by Room', `
     <table>
       <thead>
         <tr>
           <th>Room</th>
-          <th>Frozen wallets</th>
+          <th>Wallets</th>
           <th>Assets</th>
           <th>Originally USD</th>
           <th>Live USD</th>
@@ -752,11 +890,39 @@ function renderWallets() {
     return '<div class="panel"><div class="empty">Wallet pool is available to finance manager and admin.</div></div>';
   }
   const wallets = app.state.wallets || [];
+  const poolWallets = wallets.filter(walletIsPool);
+  const archivedWallets = wallets.filter(walletIsArchived);
   return `
-    ${renderLivePrices()}
-    ${panel('Wallet Pool', renderWalletTable(wallets, true), `
+    ${panel('Wallet Pool', renderWalletTable(poolWallets, { withActions: true, scanEnabled: false }), `
       <button class="btn primary" id="add-wallet-toggle">${icon('plus')}Add Wallet</button>
     `)}
+    ${archivedWallets.length ? panel('Archived Wallets', renderWalletTable(archivedWallets, { withActions: true, scanEnabled: false, archiveEnabled: false })) : ''}
+  `;
+}
+
+function renderIssuedWalletMonitoring() {
+  if (!canManageWallets()) {
+    return '<div class="panel"><div class="empty">Issued wallet monitoring is available to finance manager and admin.</div></div>';
+  }
+  const issuedWallets = (app.state.wallets || []).filter(walletIsIssued);
+  const scanEvery = Number(app.state?.settings?.walletScanEverySeconds || 300);
+  return `
+    ${renderLivePrices()}
+    ${panel('Issued Wallet Monitoring', renderWalletTable(issuedWallets, { withActions: true, scanEnabled: true, showLastScan: true }), `
+      <div class="panel-actions">
+        <span class="panel-note">Only busy and frozen wallets are scanned. Auto ${scanEvery}s.</span>
+        <button class="btn" id="scan-issued-btn">${icon('radar')}Scan Issued</button>
+      </div>
+    `)}
+  `;
+}
+
+function renderFrozenFunds() {
+  if (!canManageWallets()) {
+    return '<div class="panel"><div class="empty">Frozen funds are available to finance manager and admin.</div></div>';
+  }
+  return `
+    ${renderLivePrices()}
     ${renderFrozenRooms()}
   `;
 }
@@ -806,9 +972,8 @@ function renderBulkWalletUploadSection() {
 
 function renderWalletDetail(wallet) {
   const totals = walletTotals(wallet);
-  const latestScan = (app.state.walletScans || [])
-    .filter(scan => scan.walletId === wallet.id)
-    .sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt)))[0];
+  const latestScan = latestWalletScan(wallet.id);
+  const canScanWallet = walletIsIssued(wallet);
   return `
     <div class="wallet-ledger">
       <div class="wallet-ledger-head">
@@ -832,7 +997,9 @@ function renderWalletDetail(wallet) {
           <span>Last scan</span>
           <strong>${escapeHtml(shortDateTime(latestScan?.scannedAt))}</strong>
         </div>
-        <button class="btn primary" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}Scan Incoming</button>
+        ${canScanWallet
+          ? `<button class="btn primary" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}Scan Incoming</button>`
+          : '<div class="scan-note">This wallet is still in the pool. It will only be scanned after it is issued.</div>'}
       </div>
       <table>
         <thead>
@@ -879,7 +1046,11 @@ function renderWalletDetail(wallet) {
   `;
 }
 
-function renderWalletTable(wallets, withActions) {
+function renderWalletTable(wallets, options = {}) {
+  const withActions = typeof options === 'boolean' ? options : Boolean(options.withActions);
+  const scanEnabled = typeof options === 'boolean' ? options : options.scanEnabled !== false;
+  const archiveEnabled = typeof options === 'boolean' ? true : options.archiveEnabled !== false;
+  const showLastScan = typeof options === 'object' && Boolean(options.showLastScan);
   if (!wallets.length) return '<div class="empty">No wallets found.</div>';
   return `
     <table>
@@ -896,6 +1067,7 @@ function renderWalletTable(wallets, withActions) {
           <th>Difference</th>
           <th>Issued</th>
           <th>First Access</th>
+          ${showLastScan ? '<th>Last Scan</th>' : ''}
           <th>Status</th>
           ${withActions ? '<th style="width:132px">Action</th>' : '<th style="width:82px">Copy</th>'}
         </tr>
@@ -903,6 +1075,8 @@ function renderWalletTable(wallets, withActions) {
       <tbody>
         ${wallets.map(wallet => {
           const totals = walletTotals(wallet);
+          const latestScan = latestWalletScan(wallet.id);
+          const canScanWallet = scanEnabled && walletIsIssued(wallet);
           return `
             <tr class="${withActions ? 'clickable-row' : ''}" ${withActions ? `data-wallet-row="${escapeHtml(wallet.id)}"` : ''}>
               <td>${escapeHtml(wallet.name)}</td>
@@ -916,13 +1090,14 @@ function renderWalletTable(wallets, withActions) {
               <td>${renderUsdDelta(totals.differenceUsd)}</td>
               <td>${escapeHtml(shortDate(wallet.issuedToClientAt))}</td>
               <td>${escapeHtml(shortDate(wallet.firstAccessAt))}</td>
+              ${showLastScan ? `<td>${escapeHtml(shortDateTime(latestScan?.scannedAt))}</td>` : ''}
               <td>${statusPill(wallet.status)}</td>
               <td>
                 ${withActions
                   ? `<div class="row-actions compact-actions">
                       <button class="icon-btn" title="Details" data-wallet-details="${escapeHtml(wallet.id)}">${icon('list-search')}</button>
-                      <button class="icon-btn" title="Scan Incoming" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}</button>
-                      <button class="icon-btn" title="Archive" data-archive-wallet="${escapeHtml(wallet.id)}">${icon('archive')}</button>
+                      ${canScanWallet ? `<button class="icon-btn" title="Scan Incoming" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}</button>` : ''}
+                      ${archiveEnabled ? `<button class="icon-btn" title="Archive" data-archive-wallet="${escapeHtml(wallet.id)}">${icon('archive')}</button>` : ''}
                     </div>`
                   : `<button class="icon-btn" title="Copy" data-copy="${escapeHtml(wallet.address)}">${icon('copy')}</button>`}
               </td>
@@ -1088,6 +1263,8 @@ function renderAdmin() {
           <div class="form-grid" style="grid-template-columns:1fr">
             <label>Low wallet warning at<input name="lowWalletWarningAt" type="number" min="0" value="${escapeHtml(settings.lowWalletWarningAt)}"></label>
             <label>Backup every minutes<input name="backupEveryMinutes" type="number" min="1" value="${escapeHtml(settings.backupEveryMinutes)}"></label>
+            <label>Price refresh seconds<input name="priceCacheTtlSeconds" type="number" min="30" value="${escapeHtml(settings.priceCacheTtlSeconds || 60)}"></label>
+            <label>Issued wallet scan seconds<input name="walletScanEverySeconds" type="number" min="60" value="${escapeHtml(settings.walletScanEverySeconds || 300)}"></label>
             <label>Current journal month<input name="currentJournalMonth" value="${escapeHtml(settings.currentJournalMonth)}"></label>
             <label>Excel compatibility<select name="excelCompatibilityMode"><option value="true" ${settings.excelCompatibilityMode ? 'selected' : ''}>Enabled</option><option value="false" ${!settings.excelCompatibilityMode ? 'selected' : ''}>Disabled</option></select></label>
           </div>
@@ -1167,6 +1344,8 @@ function renderAdmin() {
       ${panel('Backup and Monthly Journal', `
         <div class="panel-body">
           <div class="profile-line"><span>Backup frequency</span><strong>Every ${escapeHtml(settings.backupEveryMinutes)} minutes</strong></div>
+          <div class="profile-line"><span>Price refresh</span><strong>Every ${escapeHtml(settings.priceCacheTtlSeconds || 60)} seconds</strong></div>
+          <div class="profile-line"><span>Issued wallet scan</span><strong>Every ${escapeHtml(settings.walletScanEverySeconds || 300)} seconds</strong></div>
           <div class="profile-line"><span>Current journal</span><strong>${escapeHtml(shortMonth(settings.currentJournalMonth))}</strong></div>
           <div class="profile-line"><span>Excel compatibility</span><strong>${settings.excelCompatibilityMode ? 'Enabled' : 'Disabled'}</strong></div>
           <div class="profile-line"><span>Monthly table</span><strong>Created automatically</strong></div>
@@ -1214,7 +1393,9 @@ function filteredRequests(rows) {
       && matches(assetLabel(row), filter.asset)
       && matches(row.room, filter.room)
       && matches(row.brand, filter.brand)
-      && matches(String(row.depositUsd), filter.amount);
+      && (matches(String(row.depositUsd), filter.amount)
+        || matches(row.originalAmount, filter.amount)
+        || matches(requestAmountDisplay(row), filter.amount));
   });
 }
 
@@ -1252,7 +1433,7 @@ function renderRequestTable(requests, showCopy) {
           <th>Client</th>
           <th>Brand</th>
           <th>Room</th>
-          <th>USD</th>
+          <th>Amount</th>
           <th>Asset</th>
           <th>Exchange</th>
           <th>Status</th>
@@ -1271,7 +1452,7 @@ function renderRequestTable(requests, showCopy) {
               <td>${escapeHtml(request.clientName)}</td>
               <td>${escapeHtml(request.brand)}</td>
               <td>${escapeHtml(request.room)}</td>
-              <td>${money(request.depositUsd)}</td>
+              <td>${escapeHtml(requestAmountDisplay(request))}</td>
               <td>${escapeHtml(assetLabel(request))}</td>
               <td>${escapeHtml(request.exchange)}</td>
               <td>${statusPill(request.status)}</td>
@@ -1361,7 +1542,9 @@ function bindViewEvents() {
     button.addEventListener('click', async () => scanWallet(button.dataset.scanWallet));
   });
 
-  $('#refresh-prices-btn')?.addEventListener('click', refreshPrices);
+  $('#scan-issued-btn')?.addEventListener('click', () => scanIssuedWallets({ force: true }));
+
+  $('#refresh-prices-btn')?.addEventListener('click', () => refreshPrices({ force: true }));
 
   $all('[data-copy]').forEach(button => {
     button.addEventListener('click', async () => {
@@ -1454,13 +1637,66 @@ async function runClientSearch() {
   renderView();
 }
 
-async function refreshPrices() {
+function stopPriceAutoRefresh() {
+  if (!app.priceRefreshTimer) return;
+  clearInterval(app.priceRefreshTimer);
+  app.priceRefreshTimer = null;
+}
+
+function startPriceAutoRefresh() {
+  if (!app.token || app.priceRefreshTimer) return;
+  const ttlSeconds = Math.max(30, Number(app.state?.settings?.priceCacheTtlSeconds || 60));
+  app.priceRefreshTimer = setInterval(() => {
+    if (!app.token || document.hidden) return;
+    refreshPrices({ silent: true, force: false });
+  }, ttlSeconds * 1000);
+}
+
+function stopWalletAutoScan() {
+  if (!app.walletScanTimer) return;
+  clearInterval(app.walletScanTimer);
+  app.walletScanTimer = null;
+}
+
+function startWalletAutoScan() {
+  if (!app.token || app.walletScanTimer || !canManageWallets()) return;
+  const scanEverySeconds = Math.max(60, Number(app.state?.settings?.walletScanEverySeconds || 300));
+  app.walletScanTimer = setInterval(() => {
+    if (!app.token || document.hidden || !canManageWallets()) return;
+    scanIssuedWallets({ silent: true, force: false });
+  }, scanEverySeconds * 1000);
+}
+
+async function refreshPrices({ silent = false, force = true } = {}) {
+  if (app.priceRefreshInFlight) return;
+  app.priceRefreshInFlight = true;
   try {
-    await api('/api/prices/refresh', { method: 'POST', body: '{}' });
-    toast('Prices refreshed', 'Live USD values updated.');
+    await api('/api/prices/refresh', { method: 'POST', body: JSON.stringify({ force }) });
+    if (!silent) toast('Prices refreshed', 'Live USD values updated.');
     await loadState();
   } catch (error) {
-    toast('Price refresh failed', error.message);
+    if (!silent) toast('Price refresh failed', error.message);
+  } finally {
+    app.priceRefreshInFlight = false;
+  }
+}
+
+async function scanIssuedWallets({ silent = false, force = false } = {}) {
+  if (app.walletScanInFlight || !canManageWallets()) return;
+  app.walletScanInFlight = true;
+  try {
+    const result = await api('/api/wallets/scan-issued', {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    });
+    if (!silent) {
+      toast('Issued wallets scanned', result.message || `${result.scanned?.length || 0} wallet(s) scanned.`);
+    }
+    await loadState();
+  } catch (error) {
+    if (!silent) toast('Issued scan failed', error.message);
+  } finally {
+    app.walletScanInFlight = false;
   }
 }
 
@@ -1700,10 +1936,16 @@ async function submitSystemSettings(event) {
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
   payload.lowWalletWarningAt = Number(payload.lowWalletWarningAt || 0);
   payload.backupEveryMinutes = Number(payload.backupEveryMinutes || 60);
+  payload.priceCacheTtlSeconds = Number(payload.priceCacheTtlSeconds || 60);
+  payload.walletScanEverySeconds = Number(payload.walletScanEverySeconds || 300);
   payload.excelCompatibilityMode = payload.excelCompatibilityMode === 'true';
   await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
   toast('System settings saved');
   await loadState();
+  stopPriceAutoRefresh();
+  stopWalletAutoScan();
+  startPriceAutoRefresh();
+  startWalletAutoScan();
 }
 
 async function submitSecurity(event) {
@@ -1744,17 +1986,30 @@ function populateRequestModal() {
   $('#request-room').innerHTML = (app.state.teams || []).map(team => `<option>${escapeHtml(team.name)}</option>`).join('');
   $('#request-exchange').innerHTML = (app.state.exchanges || []).filter(item => item.active).map(exchange => `<option>${escapeHtml(exchange.name)}</option>`).join('');
   $('#request-asset').innerHTML = renderAssetOptions();
-  syncAssetInputs($('#request-form'));
+  updateRequestAmountMode($('#request-form'));
 }
 
 async function submitRequest(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  syncAssetInputs(form);
+  updateRequestAmountMode(form);
   const payload = Object.fromEntries(new FormData(form).entries());
   delete payload.asset;
   payload.keepInWallet = payload.keepInWallet === 'true';
-  payload.depositUsd = Number(payload.depositUsd || 0);
+  if (payload.type === 'Withdraw') {
+    if (payload.crypto === 'USDT') {
+      toast('Choose a coin', 'Withdraw requests cannot use USDT. Choose BTC, ETH, SOL or XRP.');
+      return;
+    }
+    const cryptoAmountValue = Number(String(payload.originalAmount || '').replace(/,/g, ''));
+    if (!Number.isFinite(cryptoAmountValue) || cryptoAmountValue <= 0) {
+      toast('Crypto amount required', 'Withdraw requests must be entered in the selected coin.');
+      return;
+    }
+    payload.depositUsd = 0;
+  } else {
+    payload.depositUsd = Number(payload.depositUsd || 0);
+  }
   if (currentUser().role === 'agent') payload.agentId = currentUser().id;
   const result = await api('/api/requests', {
     method: 'POST',
@@ -1770,12 +2025,13 @@ async function submitRequest(event) {
     toast('Request submitted', `${result.request.id} · wallet reserved for approval`);
   }
   form.reset();
+  updateRequestAmountMode(form);
   closeModal('request-modal');
   await loadState();
 }
 
 async function checkCid() {
-  syncAssetInputs($('#request-form'));
+  updateRequestAmountMode($('#request-form'));
   const cid = $('#request-form [name="cid"]').value.trim();
   if (!cid) return toast('Enter CID first');
   const result = await api('/api/client-search', {
@@ -1840,7 +2096,7 @@ function exportLegacyCsv() {
       shortDate(request.date),
       request.brand,
       request.room,
-      request.depositUsd,
+      isWithdrawRequest(request) ? '' : request.depositUsd,
       '',
       assetLabel(request),
       request.exchange,
@@ -1879,6 +2135,8 @@ function bootEvents() {
       normalizeViewForRole();
       renderShell();
       renderView();
+      startPriceAutoRefresh();
+      startWalletAutoScan();
     } catch (error) {
       alert(error.message);
     }
@@ -1895,6 +2153,8 @@ function bootEvents() {
   $('#logout-btn').addEventListener('click', () => {
     app.token = '';
     app.state = null;
+    stopPriceAutoRefresh();
+    stopWalletAutoScan();
     localStorage.removeItem('finvaultToken');
     showLogin();
   });
@@ -1912,7 +2172,8 @@ function bootEvents() {
       if (event.target === backdrop) closeModal(backdrop.id);
     });
   });
-  $('#request-asset').addEventListener('change', event => syncAssetInputs(event.currentTarget.form));
+  $('#request-asset').addEventListener('change', event => updateRequestAmountMode(event.currentTarget.form));
+  $('#request-type').addEventListener('change', event => updateRequestAmountMode(event.currentTarget.form));
   $('#request-form').addEventListener('submit', submitRequest);
   $('#check-cid-btn').addEventListener('click', checkCid);
   $('#reject-form').addEventListener('submit', submitReject);
@@ -1929,8 +2190,12 @@ async function boot() {
   try {
     await loadState();
     showApp();
+    startPriceAutoRefresh();
+    startWalletAutoScan();
   } catch {
     localStorage.removeItem('finvaultToken');
+    stopPriceAutoRefresh();
+    stopWalletAutoScan();
     showLogin();
   }
 }
