@@ -5,6 +5,7 @@ const app = {
   clientResults: [],
   filters: {},
   selectedRoom: '',
+  selectedWalletId: '',
 };
 
 const networkOptions = {
@@ -87,6 +88,47 @@ function money(value) {
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function shortDate(value) {
+  return value ? String(value).slice(0, 10) : '-';
+}
+
+function walletSuffix(address) {
+  const text = String(address || '');
+  return text ? text.slice(-5) : '-';
+}
+
+function assetLabel(item) {
+  const crypto = item?.crypto || '';
+  const network = item?.network || '';
+  return [crypto, network].filter(Boolean).join('-') || '-';
+}
+
+function priceUsd(crypto) {
+  if (crypto === 'USDT') return 1;
+  return Number(app.state?.priceCache?.[crypto]?.usd || 0);
+}
+
+function priceStamp(crypto) {
+  return app.state?.priceCache?.[crypto]?.updatedAt || '';
+}
+
+function cryptoAmount(value, crypto = '') {
+  const digits = crypto === 'USDT' ? 2 : 6;
+  return `${Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits })} ${crypto}`.trim();
+}
+
+function walletTransactions(walletId) {
+  return (app.state?.walletTransactions || []).filter(item => item.walletId === walletId);
+}
+
+function walletTotals(wallet) {
+  const transactions = walletTransactions(wallet.id);
+  const totalCrypto = transactions.reduce((sum, tx) => sum + Number(tx.amountCrypto || 0), 0);
+  const originalUsd = transactions.reduce((sum, tx) => sum + Number(tx.originalUsd || 0), 0);
+  const currentUsd = totalCrypto * priceUsd(wallet.crypto);
+  return { transactions, totalCrypto, originalUsd, currentUsd };
 }
 
 function icon(name) {
@@ -483,7 +525,7 @@ function renderQueue() {
           <div class="meta">
             <span>CID ${escapeHtml(request.cid)}</span>
             <span>${escapeHtml(userName(request.agentId))}</span>
-            <span>${escapeHtml(request.crypto)} / ${escapeHtml(request.network)}</span>
+            <span>${escapeHtml(assetLabel(request))}</span>
             <span>${escapeHtml(request.exchange)}</span>
             <span>${money(request.depositUsd)}</span>
             <span>Proposed: ${escapeHtml(wallet?.name || request.walletId)}</span>
@@ -533,13 +575,31 @@ function renderClientResults() {
   }).join('');
 }
 
+function renderLivePrices() {
+  const assets = ['USDT', 'BTC', 'ETH', 'SOL', 'XRP'];
+  return `<div class="price-strip">
+    ${assets.map(asset => `
+      <div class="price-tile">
+        <span>${escapeHtml(asset)}</span>
+        <strong>${money(priceUsd(asset))}</strong>
+        <small>${escapeHtml(shortDate(priceStamp(asset)))}</small>
+      </div>
+    `).join('')}
+    <button class="btn" id="refresh-prices-btn">${icon('radar')}Refresh Prices</button>
+  </div>`;
+}
+
 function renderWallets() {
   if (!canManageWallets()) {
     return '<div class="panel"><div class="empty">Wallet pool is available to finance manager and admin.</div></div>';
   }
+  const wallets = app.state.wallets || [];
+  if (!app.selectedWalletId && wallets.length) app.selectedWalletId = wallets[0].id;
+  const selectedWallet = wallets.find(wallet => wallet.id === app.selectedWalletId) || wallets[0];
   return `
+    ${renderLivePrices()}
     <div class="split">
-      ${panel('Wallet Pool', renderWalletTable(app.state.wallets || [], true), `
+      ${panel('Wallet Pool', renderWalletTable(wallets, true), `
         <button class="btn primary" id="add-wallet-toggle">${icon('plus')}Add Wallet</button>
       `)}
       ${panel('Add Wallet', `
@@ -556,42 +616,114 @@ function renderWallets() {
         </form>
       `)}
     </div>
+    ${selectedWallet ? renderWalletDetail(selectedWallet) : ''}
   `;
+}
+
+function renderWalletDetail(wallet) {
+  const totals = walletTotals(wallet);
+  const latestScan = (app.state.walletScans || [])
+    .filter(scan => scan.walletId === wallet.id)
+    .sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt)))[0];
+  return panel(`Wallet ${walletSuffix(wallet.address)}`, `
+    <div class="wallet-ledger">
+      <div class="wallet-ledger-head">
+        <div>
+          <span>wallet</span>
+          <strong class="copy-address">${escapeHtml(wallet.address)}</strong>
+        </div>
+        <div>
+          <span>Asset</span>
+          <strong>${escapeHtml(assetLabel(wallet))}</strong>
+        </div>
+        <div>
+          <span>Last scan</span>
+          <strong>${escapeHtml(latestScan?.scannedAt || '-')}</strong>
+        </div>
+        <button class="btn primary" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}Scan Incoming</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Transaction</th>
+            <th>Received</th>
+            <th>Amount</th>
+            <th>Originally in USD</th>
+            <th>Live value in USD</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="ledger-total">
+            <td>Total Received</td>
+            <td>-</td>
+            <td>${escapeHtml(cryptoAmount(totals.totalCrypto, wallet.crypto))}</td>
+            <td>${money(totals.originalUsd)}</td>
+            <td>${money(totals.currentUsd)}</td>
+          </tr>
+          ${totals.transactions.length ? totals.transactions.slice().sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt))).map((tx, index) => {
+            const currentValue = Number(tx.amountCrypto || 0) * priceUsd(tx.crypto || wallet.crypto);
+            return `
+              <tr>
+                <td>${index + 1}. ${escapeHtml(tx.source || 'tx')}<span class="tx-hash">${escapeHtml(tx.txHash || '-')}</span></td>
+                <td>${escapeHtml(shortDate(tx.receivedAt))}</td>
+                <td>${escapeHtml(cryptoAmount(tx.amountCrypto, tx.crypto || wallet.crypto))}</td>
+                <td>${money(tx.originalUsd)}</td>
+                <td>${money(currentValue)}</td>
+              </tr>
+            `;
+          }).join('') : `
+            <tr><td colspan="5"><div class="empty">No incoming transactions recorded yet.</div></td></tr>
+          `}
+        </tbody>
+      </table>
+      ${latestScan?.message ? `<div class="scan-note">${escapeHtml(latestScan.message)}</div>` : ''}
+    </div>
+  `);
 }
 
 function renderWalletTable(wallets, withActions) {
   if (!wallets.length) return '<div class="empty">No wallets found.</div>';
+  const addressLabel = withActions ? 'Suffix' : 'Address';
   return `
     <table>
       <thead>
         <tr>
           <th>Name</th>
-          <th>Address</th>
-          <th>Crypto</th>
-          <th>Network</th>
+          <th style="${withActions ? 'width:86px' : ''}">${escapeHtml(addressLabel)}</th>
+          <th>Asset</th>
           <th>Exchange</th>
           <th>CID</th>
+          <th>Issued</th>
+          <th>First Access</th>
           <th>Status</th>
-          ${withActions ? '<th style="width:92px">Action</th>' : '<th style="width:82px">Copy</th>'}
+          ${withActions ? '<th style="width:132px">Action</th>' : '<th style="width:82px">Copy</th>'}
         </tr>
       </thead>
       <tbody>
-        ${wallets.map(wallet => `
-          <tr>
-            <td>${escapeHtml(wallet.name)}</td>
-            <td class="copy-address" title="${escapeHtml(wallet.address)}">${escapeHtml(wallet.address)}</td>
-            <td>${escapeHtml(wallet.crypto)}</td>
-            <td>${escapeHtml(wallet.network)}</td>
-            <td>${escapeHtml(wallet.exchange || '-')}</td>
-            <td>${escapeHtml(wallet.cid || '-')}</td>
-            <td>${statusPill(wallet.status)}</td>
-            <td>
-              ${withActions
-                ? `<button class="icon-btn" title="Archive" data-archive-wallet="${escapeHtml(wallet.id)}">${icon('archive')}</button>`
-                : `<button class="icon-btn" title="Copy" data-copy="${escapeHtml(wallet.address)}">${icon('copy')}</button>`}
-            </td>
-          </tr>
-        `).join('')}
+        ${wallets.map(wallet => {
+          const addressText = withActions ? walletSuffix(wallet.address) : wallet.address;
+          return `
+            <tr class="${wallet.id === app.selectedWalletId ? 'selected-row' : ''}">
+              <td>${escapeHtml(wallet.name)}</td>
+              <td class="copy-address" title="${escapeHtml(wallet.address)}">${escapeHtml(addressText)}</td>
+              <td>${escapeHtml(assetLabel(wallet))}</td>
+              <td>${escapeHtml(wallet.exchange || '-')}</td>
+              <td>${escapeHtml(wallet.cid || '-')}</td>
+              <td>${escapeHtml(shortDate(wallet.issuedToClientAt))}</td>
+              <td>${escapeHtml(shortDate(wallet.firstAccessAt))}</td>
+              <td>${statusPill(wallet.status)}</td>
+              <td>
+                ${withActions
+                  ? `<div class="row-actions compact-actions">
+                      <button class="icon-btn" title="Details" data-wallet-details="${escapeHtml(wallet.id)}">${icon('list-search')}</button>
+                      <button class="icon-btn" title="Scan Incoming" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}</button>
+                      <button class="icon-btn" title="Archive" data-archive-wallet="${escapeHtml(wallet.id)}">${icon('archive')}</button>
+                    </div>`
+                  : `<button class="icon-btn" title="Copy" data-copy="${escapeHtml(wallet.address)}">${icon('copy')}</button>`}
+              </td>
+            </tr>
+          `;
+        }).join('')}
       </tbody>
     </table>
   `;
@@ -934,7 +1066,7 @@ function renderRequestTable(requests, showCopy) {
               <td>${escapeHtml(request.brand)}</td>
               <td>${escapeHtml(request.room)}</td>
               <td>${money(request.depositUsd)}</td>
-              <td>${escapeHtml(request.crypto)} ${escapeHtml(request.network)}</td>
+              <td>${escapeHtml(assetLabel(request))}</td>
               <td>${escapeHtml(request.exchange)}</td>
               <td>${statusPill(request.status)}</td>
               ${showCopy ? `<td>${wallet ? `<button class="icon-btn" data-copy="${escapeHtml(wallet.address)}">${icon('copy')}</button>` : '-'}</td>` : ''}
@@ -1005,6 +1137,19 @@ function bindViewEvents() {
     });
   });
 
+  $all('[data-wallet-details]').forEach(button => {
+    button.addEventListener('click', () => {
+      app.selectedWalletId = button.dataset.walletDetails;
+      renderView();
+    });
+  });
+
+  $all('[data-scan-wallet]').forEach(button => {
+    button.addEventListener('click', async () => scanWallet(button.dataset.scanWallet));
+  });
+
+  $('#refresh-prices-btn')?.addEventListener('click', refreshPrices);
+
   $all('[data-copy]').forEach(button => {
     button.addEventListener('click', async () => {
       await navigator.clipboard.writeText(button.dataset.copy);
@@ -1060,13 +1205,38 @@ async function runClientSearch() {
   renderView();
 }
 
+async function refreshPrices() {
+  try {
+    await api('/api/prices/refresh', { method: 'POST', body: '{}' });
+    toast('Prices refreshed', 'Live USD values updated.');
+    await loadState();
+  } catch (error) {
+    toast('Price refresh failed', error.message);
+  }
+}
+
+async function scanWallet(walletId) {
+  try {
+    app.selectedWalletId = walletId;
+    const result = await api(`/api/wallets/${encodeURIComponent(walletId)}/scan`, { method: 'POST', body: '{}' });
+    toast('Wallet scan complete', result.scan?.message || `${result.added?.length || 0} new transaction(s).`);
+    await loadState();
+  } catch (error) {
+    toast('Wallet scan failed', error.message);
+  }
+}
+
 async function submitWallet(event) {
   event.preventDefault();
   const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-  await api('/api/wallets', { method: 'POST', body: JSON.stringify(payload) });
-  toast('Wallet added', payload.name || payload.address);
-  event.currentTarget.reset();
-  await loadState();
+  try {
+    await api('/api/wallets', { method: 'POST', body: JSON.stringify(payload) });
+    toast('Wallet added', payload.name || payload.address);
+    event.currentTarget.reset();
+    await loadState();
+  } catch (error) {
+    toast('Wallet not added', error.message);
+  }
 }
 
 async function submitUser(event) {
@@ -1278,13 +1448,17 @@ async function submitReject(event) {
 async function submitArchive(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-  await api(`/api/wallets/${data.walletId}/archive`, {
-    method: 'POST',
-    body: JSON.stringify({ reason: data.reason }),
-  });
-  closeModal('archive-modal');
-  toast('Wallet archived', 'Full memory saved in Audit Log.');
-  await loadState();
+  try {
+    await api(`/api/wallets/${data.walletId}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: data.reason }),
+    });
+    closeModal('archive-modal');
+    toast('Wallet archived', 'Full memory saved in Audit Log.');
+    await loadState();
+  } catch (error) {
+    toast('Wallet not archived', error.message);
+  }
 }
 
 function exportLegacyCsv() {
@@ -1306,7 +1480,7 @@ function exportLegacyCsv() {
       request.room,
       request.depositUsd,
       '',
-      `${request.crypto} ${request.network}`,
+      assetLabel(request),
       request.exchange,
       request.originalAmount,
       wallet.name || '',
