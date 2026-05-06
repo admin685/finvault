@@ -254,6 +254,10 @@ input:focus, select:focus, textarea:focus {
 .btn.ghost { background: #fff; }
 .btn.danger { background: var(--red); color: #fff; border-color: var(--red); }
 .btn.success { background: var(--green); color: #fff; border-color: var(--green); }
+.btn:disabled, .icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .icon-btn { width: 36px; padding: 0; }
 
 .metric-grid {
@@ -342,6 +346,35 @@ table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+.admin-table input,
+.admin-table select {
+  min-height: 34px;
+  padding: 6px 8px;
+}
+
+.admin-table th,
+.admin-table td {
+  white-space: normal;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.row-actions .btn {
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+.admin-add-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
 }
 
 th, td {
@@ -743,6 +776,7 @@ tr:last-child td { border-bottom: 0; }
   .span-2,
   .span-3,
   .span-4 { grid-column: 1; }
+  .admin-add-row { grid-template-columns: 1fr; }
   .queue-item { grid-template-columns: 1fr; }
   .queue-actions { justify-content: flex-start; }
   .search-row { grid-template-columns: 1fr; }

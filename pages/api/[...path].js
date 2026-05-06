@@ -514,6 +514,108 @@ function addUser(db, body, user, ip) {
   return { ok: true, user: safeUser(newUser) };
 }
 
+function updateUser(db, userId, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage users.");
+  const target = getUser(db, userId);
+  if (!target) throw new Error("User not found.");
+  const before = { ...target };
+  if (body.fullName !== undefined) target.fullName = String(body.fullName || "").trim() || target.fullName;
+  if (body.username !== undefined) {
+    const username = String(body.username || "").trim().toLowerCase();
+    if (!username) throw new Error("Username is required.");
+    if (db.users.some(item => item.id !== userId && item.username === username)) throw new Error("Username already exists.");
+    target.username = username;
+  }
+  if (body.password) target.password = String(body.password);
+  if (body.role !== undefined) target.role = String(body.role);
+  if (body.team !== undefined) target.team = String(body.team);
+  if (body.monthlyTarget !== undefined) target.monthlyTarget = Number(body.monthlyTarget || 0);
+  if (body.active !== undefined) target.active = Boolean(body.active);
+  if (body.brandAccess !== undefined) target.brandAccess = Array.isArray(body.brandAccess) ? body.brandAccess : ["All"];
+  addAudit(db, user, "user_updated", `Updated user ${before.username}.`, { ip });
+  return { ok: true, user: safeUser(target) };
+}
+
+function deactivateUser(db, userId, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can remove users.");
+  const target = getUser(db, userId);
+  if (!target) throw new Error("User not found.");
+  if (target.id === user.id) throw new Error("You cannot remove your own active account.");
+  target.active = false;
+  target.deletedAt = now();
+  target.deletedBy = user.id;
+  addAudit(db, user, "user_deactivated", `Removed access for ${target.username}. Historical records were preserved.`, { ip });
+  return { ok: true, user: safeUser(target) };
+}
+
+function updateTeam(db, teamId, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage rooms.");
+  const team = db.teams.find(item => item.id === teamId);
+  if (!team) throw new Error("Room not found.");
+  if (body.name !== undefined) team.name = String(body.name || "").trim() || team.name;
+  if (body.description !== undefined) team.description = String(body.description || "");
+  if (body.managerId !== undefined) {
+    const manager = getUser(db, body.managerId);
+    if (!manager || !["supervisor", "finance", "admin"].includes(manager.role)) throw new Error("Room manager must be supervisor, finance manager or admin.");
+    team.managerId = body.managerId;
+    if (manager.role === "supervisor") manager.team = team.name;
+  }
+  addAudit(db, user, "room_updated", `Updated room ${team.name}.`, { ip });
+  return { ok: true, team };
+}
+
+function addBrand(db, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage brands.");
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("Brand name is required.");
+  if (db.brands.some(item => item.name.toLowerCase() === name.toLowerCase())) throw new Error("Brand already exists.");
+  const brand = { id: `brand-${crypto.randomUUID().slice(0, 8)}`, name, active: true };
+  db.brands.push(brand);
+  addAudit(db, user, "brand_added", `Added brand ${name}.`, { ip });
+  return { ok: true, brand };
+}
+
+function updateBrand(db, brandId, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage brands.");
+  const brand = db.brands.find(item => item.id === brandId);
+  if (!brand) throw new Error("Brand not found.");
+  if (body.name !== undefined) brand.name = String(body.name || "").trim() || brand.name;
+  if (body.active !== undefined) brand.active = Boolean(body.active);
+  addAudit(db, user, "brand_updated", `Updated brand ${brand.name}.`, { ip });
+  return { ok: true, brand };
+}
+
+function addExchange(db, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage exchanges.");
+  const name = String(body.name || "").trim();
+  if (!name) throw new Error("Exchange name is required.");
+  if (db.exchanges.some(item => item.name.toLowerCase() === name.toLowerCase())) throw new Error("Exchange already exists.");
+  const exchange = { id: `ex-${crypto.randomUUID().slice(0, 8)}`, name, active: true };
+  db.exchanges.push(exchange);
+  addAudit(db, user, "exchange_added", `Added exchange ${name}.`, { ip });
+  return { ok: true, exchange };
+}
+
+function updateExchange(db, exchangeId, body, user, ip) {
+  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage exchanges.");
+  const exchange = db.exchanges.find(item => item.id === exchangeId);
+  if (!exchange) throw new Error("Exchange not found.");
+  if (body.name !== undefined) exchange.name = String(body.name || "").trim() || exchange.name;
+  if (body.active !== undefined) exchange.active = Boolean(body.active);
+  addAudit(db, user, "exchange_updated", `Updated exchange ${exchange.name}.`, { ip });
+  return { ok: true, exchange };
+}
+
+function updateSettings(db, body, user, ip) {
+  if (user.role !== "admin") throw new Error("Only admin can change system settings.");
+  if (body.lowWalletWarningAt !== undefined) db.settings.lowWalletWarningAt = Number(body.lowWalletWarningAt || 0);
+  if (body.backupEveryMinutes !== undefined) db.settings.backupEveryMinutes = Number(body.backupEveryMinutes || 60);
+  if (body.excelCompatibilityMode !== undefined) db.settings.excelCompatibilityMode = Boolean(body.excelCompatibilityMode);
+  if (body.currentJournalMonth !== undefined) db.settings.currentJournalMonth = String(body.currentJournalMonth || db.settings.currentJournalMonth);
+  addAudit(db, user, "system_settings_updated", "System settings updated.", { ip });
+  return { ok: true, settings: db.settings };
+}
+
 function updateSecurity(db, body, user, ip) {
   if (!canManageSecurity(user)) throw new Error("Only admin can change security settings.");
   if (body.ipWhitelistEnabled !== undefined) db.settings.ipWhitelistEnabled = Boolean(body.ipWhitelistEnabled);
@@ -564,6 +666,14 @@ export default async function handler(req, res) {
     else if (path.match(/^wallets\/[^/]+\/archive$/) && method === "POST") result = archiveWallet(db, path.split("/")[1], req.body?.reason || "", user, ip);
     else if (path === "client-search" && method === "POST") result = clientSearch(db, req.body?.query || "", user, ip);
     else if (path === "users" && method === "POST") result = addUser(db, req.body || {}, user, ip);
+    else if (path.match(/^users\/[^/]+$/) && method === "PATCH") result = updateUser(db, path.split("/")[1], req.body || {}, user, ip);
+    else if (path.match(/^users\/[^/]+$/) && method === "DELETE") result = deactivateUser(db, path.split("/")[1], user, ip);
+    else if (path.match(/^teams\/[^/]+$/) && method === "PATCH") result = updateTeam(db, path.split("/")[1], req.body || {}, user, ip);
+    else if (path === "brands" && method === "POST") result = addBrand(db, req.body || {}, user, ip);
+    else if (path.match(/^brands\/[^/]+$/) && method === "PATCH") result = updateBrand(db, path.split("/")[1], req.body || {}, user, ip);
+    else if (path === "exchanges" && method === "POST") result = addExchange(db, req.body || {}, user, ip);
+    else if (path.match(/^exchanges\/[^/]+$/) && method === "PATCH") result = updateExchange(db, path.split("/")[1], req.body || {}, user, ip);
+    else if (path === "settings" && method === "POST") result = updateSettings(db, req.body || {}, user, ip);
     else if (path === "security" && method === "POST") result = updateSecurity(db, req.body || {}, user, ip);
     else if (path === "backup" && method === "POST") {
       addAudit(db, user, "backup_requested", "Vercel version stores data in Postgres; use database backups from provider.", { ip });

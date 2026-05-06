@@ -654,22 +654,37 @@ function renderAdmin() {
     return '<div class="panel"><div class="empty">Admin page is available to finance manager and admin.</div></div>';
   }
   const settings = app.state.settings;
+  const teams = app.state.teams || [];
+  const users = app.state.users || [];
+  const managers = users.filter(user => ['supervisor', 'finance', 'admin'].includes(user.role) && user.active);
+  const roleOptions = role => ['agent', 'supervisor', 'finance', 'admin'].map(item => `<option value="${item}" ${role === item ? 'selected' : ''}>${roleLabel(item)}</option>`).join('');
+  const teamOptions = team => [...teams.map(item => item.name), 'Finance', 'Ops'].filter((item, index, arr) => arr.indexOf(item) === index).map(item => `<option value="${escapeHtml(item)}" ${team === item ? 'selected' : ''}>${escapeHtml(item)}</option>`).join('');
+  const activeOptions = active => `<option value="true" ${active ? 'selected' : ''}>Active</option><option value="false" ${!active ? 'selected' : ''}>Blocked</option>`;
+  const managerOptions = managerId => managers.map(manager => `<option value="${escapeHtml(manager.id)}" ${manager.id === managerId ? 'selected' : ''}>${escapeHtml(manager.fullName)} · ${roleLabel(manager.role)}</option>`).join('');
+
   return `
+    <div class="metric-grid">
+      ${metric('Users', users.length, 'users')}
+      ${metric('Active agents', users.filter(user => user.role === 'agent' && user.active).length, 'user-check')}
+      ${metric('Rooms', teams.length, 'monitor')}
+      ${metric('Active exchanges', (app.state.exchanges || []).filter(item => item.active).length, 'landmark')}
+    </div>
+
     ${panel('Rooms and Managers', `
       <table>
         <thead>
-          <tr><th>Room</th><th>Manager</th><th>Agents</th><th>Description</th></tr>
+          <tr><th style="width:90px">Room</th><th>Manager</th><th>Agents</th><th>Description</th><th style="width:92px">Action</th></tr>
         </thead>
         <tbody>
           ${(app.state.teams || []).filter(team => ['M', 'T', 'T2'].includes(team.name)).map(team => {
-            const manager = getRoomManager(team);
             const agents = (app.state.users || []).filter(user => user.role === 'agent' && user.team === team.name);
             return `
-              <tr>
+              <tr data-team-row="${escapeHtml(team.id)}">
                 <td><strong>Room ${escapeHtml(team.name)}</strong></td>
-                <td>${escapeHtml(manager?.fullName || '-')}</td>
+                <td><select data-field="managerId">${managerOptions(team.managerId)}</select></td>
                 <td>${agents.map(agent => escapeHtml(agent.fullName)).join(', ') || '-'}</td>
-                <td>${escapeHtml(team.description || '')}</td>
+                <td><input data-field="description" value="${escapeHtml(team.description || '')}"></td>
+                <td><button class="btn primary" data-save-team="${escapeHtml(team.id)}">${icon('save')}Save</button></td>
               </tr>
             `;
           }).join('')}
@@ -677,39 +692,117 @@ function renderAdmin() {
       </table>
     `)}
 
-    <div class="split">
-      ${panel('Users, Teams and Targets', `
-        <table>
-          <thead>
-            <tr><th>User</th><th>Username</th><th>Role</th><th>Team</th><th>Target</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            ${(app.state.users || []).map(user => `
-              <tr>
-                <td>${escapeHtml(user.fullName)}</td>
-                <td>${escapeHtml(user.username)}</td>
-                <td>${escapeHtml(roleLabel(user.role))}</td>
-                <td>${escapeHtml(user.team)}</td>
-                <td>${user.monthlyTarget ? money(user.monthlyTarget) : '-'}</td>
-                <td>${statusPill(user.active ? 'active' : 'blocked')}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `)}
+    ${panel('Users, Agents and Roles', `
+      <div class="panel-body" style="padding-bottom:0">
+        <span class="micro-copy">Delete removes access but keeps history and Audit Log intact.</span>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>Full name</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Team</th>
+            <th>Target</th>
+            <th>Password</th>
+            <th>Status</th>
+            <th style="width:172px">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(user => `
+            <tr data-user-row="${escapeHtml(user.id)}">
+              <td><input data-field="fullName" value="${escapeHtml(user.fullName)}"></td>
+              <td><input data-field="username" value="${escapeHtml(user.username)}"></td>
+              <td><select data-field="role">${roleOptions(user.role)}</select></td>
+              <td><select data-field="team">${teamOptions(user.team)}</select></td>
+              <td><input data-field="monthlyTarget" type="number" value="${Number(user.monthlyTarget || 0)}"></td>
+              <td><input data-field="password" type="password" placeholder="Leave unchanged"></td>
+              <td><select data-field="active">${activeOptions(user.active)}</select></td>
+              <td>
+                <div class="row-actions">
+                  <button class="btn primary" data-save-user="${escapeHtml(user.id)}">${icon('save')}Save</button>
+                  <button class="btn danger" data-delete-user="${escapeHtml(user.id)}" ${user.id === currentUser().id ? 'disabled' : ''}>${icon('trash-2')}Delete</button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `)}
 
-      ${panel('Create User', `
+    <div class="split" style="margin-top:18px">
+      ${panel('Create User / Agent', `
         <form id="add-user-form" class="panel-body">
           <div class="form-grid" style="grid-template-columns:1fr">
             <label>Full name<input name="fullName" required></label>
             <label>Username<input name="username" required></label>
             <label>Password<input name="password" value="changeme123" required></label>
             <label>Role<select name="role"><option value="agent">Agent</option><option value="supervisor">Supervisor</option><option value="finance">Finance Manager</option><option value="admin">Admin</option></select></label>
-            <label>Team<select name="team">${(app.state.teams || []).map(team => `<option>${escapeHtml(team.name)}</option>`).join('')}<option>Finance</option><option>Ops</option></select></label>
+            <label>Team<select name="team">${teamOptions('M')}</select></label>
             <label>Monthly target<input name="monthlyTarget" type="number" value="100000"></label>
           </div>
           <div class="modal-footer"><button class="btn primary" type="submit">${icon('user-plus')}Create User</button></div>
         </form>
+      `)}
+
+      ${panel('System Settings', `
+        <form id="system-settings-form" class="panel-body">
+          <div class="form-grid" style="grid-template-columns:1fr">
+            <label>Low wallet warning at<input name="lowWalletWarningAt" type="number" min="0" value="${escapeHtml(settings.lowWalletWarningAt)}"></label>
+            <label>Backup every minutes<input name="backupEveryMinutes" type="number" min="1" value="${escapeHtml(settings.backupEveryMinutes)}"></label>
+            <label>Current journal month<input name="currentJournalMonth" value="${escapeHtml(settings.currentJournalMonth)}"></label>
+            <label>Excel compatibility<select name="excelCompatibilityMode"><option value="true" ${settings.excelCompatibilityMode ? 'selected' : ''}>Enabled</option><option value="false" ${!settings.excelCompatibilityMode ? 'selected' : ''}>Disabled</option></select></label>
+          </div>
+          <div class="modal-footer">
+            <span class="micro-copy">Only admin can save system settings.</span>
+            <button class="btn primary" type="submit" ${currentUser().role === 'admin' ? '' : 'disabled'}>${icon('save')}Save Settings</button>
+          </div>
+        </form>
+      `)}
+    </div>
+
+    <div class="split" style="margin-top:18px">
+      ${panel('Brands', `
+        <form id="add-brand-form" class="panel-body admin-add-row">
+          <input name="name" placeholder="New brand name" required>
+          <button class="btn primary" type="submit">${icon('plus')}Add Brand</button>
+        </form>
+        <table class="admin-table">
+          <thead>
+            <tr><th>Name</th><th>Status</th><th style="width:92px">Action</th></tr>
+          </thead>
+          <tbody>
+            ${(app.state.brands || []).map(brand => `
+              <tr data-brand-row="${escapeHtml(brand.id)}">
+                <td><input data-field="name" value="${escapeHtml(brand.name)}"></td>
+                <td><select data-field="active">${activeOptions(brand.active)}</select></td>
+                <td><button class="btn primary" data-save-brand="${escapeHtml(brand.id)}">${icon('save')}Save</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `)}
+
+      ${panel('Exchanges', `
+        <form id="add-exchange-form" class="panel-body admin-add-row">
+          <input name="name" placeholder="New exchange name" required>
+          <button class="btn primary" type="submit">${icon('plus')}Add Exchange</button>
+        </form>
+        <table class="admin-table">
+          <thead>
+            <tr><th>Name</th><th>Status</th><th style="width:92px">Action</th></tr>
+          </thead>
+          <tbody>
+            ${(app.state.exchanges || []).map(exchange => `
+              <tr data-exchange-row="${escapeHtml(exchange.id)}">
+                <td><input data-field="name" value="${escapeHtml(exchange.name)}"></td>
+                <td><select data-field="active">${activeOptions(exchange.active)}</select></td>
+                <td><button class="btn primary" data-save-exchange="${escapeHtml(exchange.id)}">${icon('save')}Save</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
       `)}
     </div>
 
@@ -869,6 +962,26 @@ function bindViewEvents() {
     });
   });
 
+  $all('[data-save-user]').forEach(button => {
+    button.addEventListener('click', async () => saveUser(button.dataset.saveUser));
+  });
+
+  $all('[data-delete-user]').forEach(button => {
+    button.addEventListener('click', async () => deleteUser(button.dataset.deleteUser));
+  });
+
+  $all('[data-save-team]').forEach(button => {
+    button.addEventListener('click', async () => saveTeam(button.dataset.saveTeam));
+  });
+
+  $all('[data-save-brand]').forEach(button => {
+    button.addEventListener('click', async () => saveBrand(button.dataset.saveBrand));
+  });
+
+  $all('[data-save-exchange]').forEach(button => {
+    button.addEventListener('click', async () => saveExchange(button.dataset.saveExchange));
+  });
+
   $all('[data-approve]').forEach(button => {
     button.addEventListener('click', async () => {
       await api(`/api/requests/${button.dataset.approve}/approve`, { method: 'POST', body: '{}' });
@@ -922,6 +1035,9 @@ function bindViewEvents() {
   $('#wallet-crypto')?.addEventListener('change', () => setNetworkOptions('wallet-crypto', 'wallet-network'));
   if ($('#wallet-network')) setNetworkOptions('wallet-crypto', 'wallet-network');
   $('#add-user-form')?.addEventListener('submit', submitUser);
+  $('#add-brand-form')?.addEventListener('submit', submitBrand);
+  $('#add-exchange-form')?.addEventListener('submit', submitExchange);
+  $('#system-settings-form')?.addEventListener('submit', submitSystemSettings);
   $('#security-form')?.addEventListener('submit', submitSecurity);
   $('#manual-backup-btn')?.addEventListener('click', createBackup);
   $('#export-csv-btn')?.addEventListener('click', exportLegacyCsv);
@@ -960,6 +1076,98 @@ async function submitUser(event) {
   await api('/api/users', { method: 'POST', body: JSON.stringify(payload) });
   toast('User created', payload.username);
   event.currentTarget.reset();
+  await loadState();
+}
+
+function rowPayload(selector, id) {
+  const row = $(`${selector}="${CSS.escape(id)}"]`);
+  const payload = {};
+  $all('[data-field]', row).forEach(input => {
+    if (input.value === '' && input.dataset.field === 'password') return;
+    payload[input.dataset.field] = input.value;
+  });
+  if (payload.active !== undefined) payload.active = payload.active === 'true';
+  if (payload.monthlyTarget !== undefined) payload.monthlyTarget = Number(payload.monthlyTarget || 0);
+  return payload;
+}
+
+async function saveUser(userId) {
+  const payload = rowPayload('[data-user-row', userId);
+  await api(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  toast('User saved', payload.username || userId);
+  await loadState();
+}
+
+async function deleteUser(userId) {
+  const target = (app.state.users || []).find(user => user.id === userId);
+  if (!window.confirm(`Remove access for ${target?.fullName || userId}? History will be preserved.`)) return;
+  await api(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    body: '{}',
+  });
+  toast('User removed', target?.username || userId);
+  await loadState();
+}
+
+async function saveTeam(teamId) {
+  const payload = rowPayload('[data-team-row', teamId);
+  await api(`/api/teams/${encodeURIComponent(teamId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  toast('Room saved', teamId);
+  await loadState();
+}
+
+async function submitBrand(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  await api('/api/brands', { method: 'POST', body: JSON.stringify(payload) });
+  toast('Brand added', payload.name);
+  event.currentTarget.reset();
+  await loadState();
+}
+
+async function saveBrand(brandId) {
+  const payload = rowPayload('[data-brand-row', brandId);
+  await api(`/api/brands/${encodeURIComponent(brandId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  toast('Brand saved', payload.name || brandId);
+  await loadState();
+}
+
+async function submitExchange(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  await api('/api/exchanges', { method: 'POST', body: JSON.stringify(payload) });
+  toast('Exchange added', payload.name);
+  event.currentTarget.reset();
+  await loadState();
+}
+
+async function saveExchange(exchangeId) {
+  const payload = rowPayload('[data-exchange-row', exchangeId);
+  await api(`/api/exchanges/${encodeURIComponent(exchangeId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  toast('Exchange saved', payload.name || exchangeId);
+  await loadState();
+}
+
+async function submitSystemSettings(event) {
+  event.preventDefault();
+  const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+  payload.lowWalletWarningAt = Number(payload.lowWalletWarningAt || 0);
+  payload.backupEveryMinutes = Number(payload.backupEveryMinutes || 60);
+  payload.excelCompatibilityMode = payload.excelCompatibilityMode === 'true';
+  await api('/api/settings', { method: 'POST', body: JSON.stringify(payload) });
+  toast('System settings saved');
   await loadState();
 }
 
