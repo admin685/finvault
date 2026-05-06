@@ -86,12 +86,47 @@ function money(value) {
   });
 }
 
+function signedMoney(value) {
+  const amount = Number(value || 0);
+  const abs = money(Math.abs(amount));
+  if (amount > 0) return `+${abs}`;
+  if (amount < 0) return `-${abs}`;
+  return abs;
+}
+
+function deltaClass(value) {
+  const amount = Number(value || 0);
+  if (amount > 0.004) return 'positive';
+  if (amount < -0.004) return 'negative';
+  return 'neutral';
+}
+
+function renderUsdDelta(value) {
+  return `<span class="usd-delta ${deltaClass(value)}">${escapeHtml(signedMoney(value))}</span>`;
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function shortDate(value) {
-  return value ? String(value).slice(0, 10) : '-';
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}.${match[2]}.${match[1].slice(-2)}`;
+  return text;
+}
+
+function shortDateTime(value) {
+  const text = String(value || '').trim();
+  if (!text) return '-';
+  const time = text.match(/[T ](\d{2}:\d{2})/);
+  return time ? `${shortDate(text)} ${time[1]}` : shortDate(text);
+}
+
+function shortMonth(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})/);
+  return match ? `${match[2]}.${match[1].slice(-2)}` : shortDate(value);
 }
 
 function walletSuffix(address) {
@@ -99,17 +134,34 @@ function walletSuffix(address) {
   return text ? text.slice(-5) : '-';
 }
 
+function shortTxHash(value) {
+  const text = String(value || '');
+  if (!text) return '-';
+  return text.length > 22 ? `${text.slice(0, 10)}...${text.slice(-6)}` : text;
+}
+
+function assetDisplayLabel(crypto, network) {
+  if (!crypto) return '-';
+  if (crypto === 'USDT') return network ? `${crypto}-${network}` : crypto;
+  if (crypto === 'ETH') return network ? `${crypto}-${network}` : crypto;
+  return crypto;
+}
+
+function legacyAssetLabel(item) {
+  return [item?.crypto || '', item?.network || ''].filter(Boolean).join('-') || '-';
+}
+
 function assetLabel(item) {
-  const crypto = item?.crypto || '';
-  const network = item?.network || '';
-  return [crypto, network].filter(Boolean).join('-') || '-';
+  return assetDisplayLabel(item?.crypto || '', item?.network || '');
 }
 
 function assetOptions() {
-  if (app.state?.assets?.length) return app.state.assets;
-  return Object.entries(networkOptions).flatMap(([crypto, networks]) =>
-    networks.map(network => ({ crypto, network, label: `${crypto}-${network}` }))
-  );
+  const source = app.state?.assets?.length
+    ? app.state.assets
+    : Object.entries(networkOptions).flatMap(([crypto, networks]) =>
+      networks.map(network => ({ crypto, network }))
+    );
+  return source.map(asset => ({ ...asset, label: assetDisplayLabel(asset.crypto, asset.network) }));
 }
 
 function renderAssetOptions(selected = '') {
@@ -120,7 +172,11 @@ function renderAssetOptions(selected = '') {
 }
 
 function splitAssetValue(value) {
-  const asset = assetOptions().find(item => (item.label || assetLabel(item)) === value);
+  const clean = String(value || '').trim().toUpperCase();
+  const asset = assetOptions().find(item => {
+    const labels = [item.label, assetLabel(item), legacyAssetLabel(item)].map(label => String(label || '').toUpperCase());
+    return labels.includes(clean);
+  });
   if (asset) return { crypto: asset.crypto, network: asset.network };
   const [crypto, ...networkParts] = String(value || '').split('-');
   return { crypto: crypto || '', network: networkParts.join('-') };
@@ -145,19 +201,28 @@ function priceStamp(crypto) {
 
 function cryptoAmount(value, crypto = '') {
   const digits = crypto === 'USDT' ? 2 : 6;
-  return `${Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits })} ${crypto}`.trim();
+  return Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits });
 }
 
 function walletTransactions(walletId) {
   return (app.state?.walletTransactions || []).filter(item => item.walletId === walletId);
 }
 
+function transactionLiveUsd(tx, fallbackCrypto = '') {
+  return Number(tx.amountCrypto || 0) * priceUsd(tx.crypto || fallbackCrypto);
+}
+
+function transactionDifferenceUsd(tx, fallbackCrypto = '') {
+  return transactionLiveUsd(tx, fallbackCrypto) - Number(tx.originalUsd || 0);
+}
+
 function walletTotals(wallet) {
   const transactions = walletTransactions(wallet.id);
   const totalCrypto = transactions.reduce((sum, tx) => sum + Number(tx.amountCrypto || 0), 0);
   const originalUsd = transactions.reduce((sum, tx) => sum + Number(tx.originalUsd || 0), 0);
-  const currentUsd = totalCrypto * priceUsd(wallet.crypto);
-  return { transactions, totalCrypto, originalUsd, currentUsd };
+  const currentUsd = transactions.reduce((sum, tx) => sum + transactionLiveUsd(tx, wallet.crypto), 0);
+  const differenceUsd = currentUsd - originalUsd;
+  return { transactions, totalCrypto, originalUsd, currentUsd, differenceUsd };
 }
 
 function walletRoom(wallet) {
@@ -177,10 +242,11 @@ function frozenRoomRows() {
   (app.state?.wallets || []).filter(wallet => wallet.status === 'frozen').forEach(wallet => {
     const room = walletRoom(wallet);
     const totals = walletTotals(wallet);
-    const row = grouped.get(room) || { room, wallets: 0, originalUsd: 0, currentUsd: 0, assets: new Map() };
+    const row = grouped.get(room) || { room, wallets: 0, originalUsd: 0, currentUsd: 0, differenceUsd: 0, assets: new Map() };
     row.wallets += 1;
     row.originalUsd += totals.originalUsd;
     row.currentUsd += totals.currentUsd;
+    row.differenceUsd += totals.differenceUsd;
     const asset = assetLabel(wallet);
     const assetRow = row.assets.get(asset) || { crypto: wallet.crypto, totalCrypto: 0 };
     assetRow.totalCrypto += totals.totalCrypto;
@@ -522,7 +588,7 @@ function renderAgentScreen() {
         <div><span>Manager</span><strong>${escapeHtml(manager?.fullName || '-')}</strong></div>
         <div><span>Room</span><strong>${escapeHtml(selectedTeam.name)}</strong></div>
         <div><span>Agents</span><strong>${rows.length}</strong></div>
-        <div><span>Journal</span><strong>${escapeHtml(app.state.settings.currentJournalMonth)}</strong></div>
+        <div><span>Journal</span><strong>${escapeHtml(shortMonth(app.state.settings.currentJournalMonth))}</strong></div>
       </div>
 
       <div class="screen-table-wrap">
@@ -626,7 +692,7 @@ function renderClientResults() {
           <div class="profile-line"><span>Brand</span><strong>${escapeHtml(client.brand)}</strong></div>
           <div class="profile-line"><span>Total wallets</span><strong>${result.totalWallets || 0}</strong></div>
           <div class="profile-line"><span>Total deposits</span><strong>${money(result.totalDeposits)}</strong></div>
-          <div class="profile-line"><span>Last activity</span><strong>${escapeHtml(result.lastActivity || '-')}</strong></div>
+          <div class="profile-line"><span>Last activity</span><strong>${escapeHtml(shortDate(result.lastActivity))}</strong></div>
         </div>
         ${panel('Wallets', renderWalletTable(result.wallets || [], false))}
       </div>
@@ -662,6 +728,7 @@ function renderFrozenRooms() {
           <th>Assets</th>
           <th>Originally USD</th>
           <th>Live USD</th>
+          <th>Difference</th>
         </tr>
       </thead>
       <tbody>
@@ -672,6 +739,7 @@ function renderFrozenRooms() {
             <td>${Array.from(row.assets.entries()).map(([asset, value]) => `${escapeHtml(asset)}: ${escapeHtml(cryptoAmount(value.totalCrypto, value.crypto))}`).join('<br>')}</td>
             <td>${money(row.originalUsd)}</td>
             <td>${money(row.currentUsd)}</td>
+            <td>${renderUsdDelta(row.differenceUsd)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -684,38 +752,39 @@ function renderWallets() {
     return '<div class="panel"><div class="empty">Wallet pool is available to finance manager and admin.</div></div>';
   }
   const wallets = app.state.wallets || [];
-  if (!app.selectedWalletId && wallets.length) app.selectedWalletId = wallets[0].id;
-  const selectedWallet = wallets.find(wallet => wallet.id === app.selectedWalletId) || wallets[0];
   return `
     ${renderLivePrices()}
-    <div class="split">
-      ${panel('Wallet Pool', renderWalletTable(wallets, true), `
-        <button class="btn primary" id="add-wallet-toggle">${icon('plus')}Add Wallet</button>
-      `)}
-      ${panel('Add Wallet', `
-        <form id="add-wallet-form" class="panel-body">
-          <div class="form-grid" style="grid-template-columns:1fr">
-            <label>Name<input name="name" placeholder="Optional"></label>
-            <label>Address<input name="address" required placeholder="Wallet address"></label>
-            <label>Asset<select name="asset" id="wallet-asset" required>${renderAssetOptions()}</select></label>
-            <input type="hidden" name="crypto">
-            <input type="hidden" name="network">
-          </div>
-          <div class="modal-footer">
-            <button class="btn primary" type="submit">${icon('plus')}Add Wallet</button>
-          </div>
-        </form>
-      `)}
-    </div>
+    ${panel('Wallet Pool', renderWalletTable(wallets, true), `
+      <button class="btn primary" id="add-wallet-toggle">${icon('plus')}Add Wallet</button>
+    `)}
     ${renderFrozenRooms()}
-    ${renderBulkWalletUpload()}
-    ${selectedWallet ? renderWalletDetail(selectedWallet) : ''}
   `;
 }
 
-function renderBulkWalletUpload() {
-  return panel('Bulk Wallet Upload', `
-    <div class="panel-body">
+function renderAddWalletModalSection() {
+  return `
+    <section class="modal-section">
+      <h3>Add Wallet</h3>
+      <form id="add-wallet-form">
+        <div class="form-grid compact">
+          <label>Name<input name="name" placeholder="Optional"></label>
+          <label>Address<input name="address" required placeholder="Wallet address"></label>
+          <label>Asset<select name="asset" id="wallet-asset" required>${renderAssetOptions()}</select></label>
+          <input type="hidden" name="crypto">
+          <input type="hidden" name="network">
+        </div>
+        <div class="modal-footer">
+          <button class="btn primary" type="submit">${icon('plus')}Add Wallet</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderBulkWalletUploadSection() {
+  return `
+    <section class="modal-section">
+      <h3>Bulk Wallet Upload</h3>
       <div class="bulk-upload-grid">
         <div>
           <div class="profile-line"><span>Required columns</span><strong>Name, Address, Asset</strong></div>
@@ -731,8 +800,8 @@ function renderBulkWalletUpload() {
         </div>
       </div>
       <div id="bulk-wallet-result" class="scan-note"></div>
-    </div>
-  `);
+    </section>
+  `;
 }
 
 function renderWalletDetail(wallet) {
@@ -740,9 +809,17 @@ function renderWalletDetail(wallet) {
   const latestScan = (app.state.walletScans || [])
     .filter(scan => scan.walletId === wallet.id)
     .sort((a, b) => String(b.scannedAt).localeCompare(String(a.scannedAt)))[0];
-  return panel(`Wallet ${walletSuffix(wallet.address)}`, `
+  return `
     <div class="wallet-ledger">
       <div class="wallet-ledger-head">
+        <div>
+          <span>Name</span>
+          <strong>${escapeHtml(wallet.name)}</strong>
+        </div>
+        <div>
+          <span>Suffix</span>
+          <strong>${escapeHtml(walletSuffix(wallet.address))}</strong>
+        </div>
         <div>
           <span>wallet</span>
           <strong class="copy-address">${escapeHtml(wallet.address)}</strong>
@@ -753,7 +830,7 @@ function renderWalletDetail(wallet) {
         </div>
         <div>
           <span>Last scan</span>
-          <strong>${escapeHtml(latestScan?.scannedAt || '-')}</strong>
+          <strong>${escapeHtml(shortDateTime(latestScan?.scannedAt))}</strong>
         </div>
         <button class="btn primary" data-scan-wallet="${escapeHtml(wallet.id)}">${icon('radar')}Scan Incoming</button>
       </div>
@@ -761,56 +838,62 @@ function renderWalletDetail(wallet) {
         <thead>
           <tr>
             <th>Transaction</th>
+            <th>TRX</th>
             <th>Received</th>
             <th>Amount</th>
             <th>Originally in USD</th>
             <th>Live value in USD</th>
+            <th>Difference</th>
           </tr>
         </thead>
         <tbody>
           <tr class="ledger-total">
             <td>Total Received</td>
             <td>-</td>
+            <td>-</td>
             <td>${escapeHtml(cryptoAmount(totals.totalCrypto, wallet.crypto))}</td>
             <td>${money(totals.originalUsd)}</td>
             <td>${money(totals.currentUsd)}</td>
+            <td>${renderUsdDelta(totals.differenceUsd)}</td>
           </tr>
           ${totals.transactions.length ? totals.transactions.slice().sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt))).map((tx, index) => {
-            const currentValue = Number(tx.amountCrypto || 0) * priceUsd(tx.crypto || wallet.crypto);
+            const currentValue = transactionLiveUsd(tx, wallet.crypto);
             return `
               <tr>
-                <td>${index + 1}. ${escapeHtml(tx.source || 'tx')}<span class="tx-hash">${escapeHtml(tx.txHash || '-')}</span></td>
+                <td>${index + 1}. ${escapeHtml(tx.source || 'tx')}</td>
+                <td><span class="tx-hash" title="${escapeHtml(tx.txHash || '-')}">${escapeHtml(shortTxHash(tx.txHash))}</span></td>
                 <td>${escapeHtml(shortDate(tx.receivedAt))}</td>
                 <td>${escapeHtml(cryptoAmount(tx.amountCrypto, tx.crypto || wallet.crypto))}</td>
                 <td>${money(tx.originalUsd)}</td>
                 <td>${money(currentValue)}</td>
+                <td>${renderUsdDelta(transactionDifferenceUsd(tx, wallet.crypto))}</td>
               </tr>
             `;
           }).join('') : `
-            <tr><td colspan="5"><div class="empty">No incoming transactions recorded yet.</div></td></tr>
+            <tr><td colspan="7"><div class="empty">No incoming transactions recorded yet.</div></td></tr>
           `}
         </tbody>
       </table>
       ${latestScan?.message ? `<div class="scan-note">${escapeHtml(latestScan.message)}</div>` : ''}
     </div>
-  `);
+  `;
 }
 
 function renderWalletTable(wallets, withActions) {
   if (!wallets.length) return '<div class="empty">No wallets found.</div>';
-  const addressLabel = withActions ? 'Suffix' : 'Address';
   return `
     <table>
       <thead>
         <tr>
           <th>Name</th>
-          <th style="${withActions ? 'width:86px' : ''}">${escapeHtml(addressLabel)}</th>
+          ${withActions ? '' : '<th>Address</th>'}
           <th>Asset</th>
           <th>Exchange</th>
           <th>CID</th>
           <th>Total Received</th>
           <th>Originally USD</th>
           <th>Live USD</th>
+          <th>Difference</th>
           <th>Issued</th>
           <th>First Access</th>
           <th>Status</th>
@@ -819,18 +902,18 @@ function renderWalletTable(wallets, withActions) {
       </thead>
       <tbody>
         ${wallets.map(wallet => {
-          const addressText = withActions ? walletSuffix(wallet.address) : wallet.address;
           const totals = walletTotals(wallet);
           return `
-            <tr class="${wallet.id === app.selectedWalletId ? 'selected-row' : ''}">
+            <tr class="${withActions ? 'clickable-row' : ''}" ${withActions ? `data-wallet-row="${escapeHtml(wallet.id)}"` : ''}>
               <td>${escapeHtml(wallet.name)}</td>
-              <td class="copy-address" title="${escapeHtml(wallet.address)}">${escapeHtml(addressText)}</td>
+              ${withActions ? '' : `<td class="copy-address" title="${escapeHtml(wallet.address)}">${escapeHtml(wallet.address)}</td>`}
               <td>${escapeHtml(assetLabel(wallet))}</td>
               <td>${escapeHtml(wallet.exchange || '-')}</td>
               <td>${escapeHtml(wallet.cid || '-')}</td>
               <td>${escapeHtml(cryptoAmount(totals.totalCrypto, wallet.crypto))}</td>
               <td>${money(totals.originalUsd)}</td>
               <td>${money(totals.currentUsd)}</td>
+              <td>${renderUsdDelta(totals.differenceUsd)}</td>
               <td>${escapeHtml(shortDate(wallet.issuedToClientAt))}</td>
               <td>${escapeHtml(shortDate(wallet.firstAccessAt))}</td>
               <td>${statusPill(wallet.status)}</td>
@@ -855,7 +938,7 @@ function renderHistory() {
   const rows = filteredRequests(app.state.requests || []);
   return `
     ${renderFilters('history')}
-    ${panel(`Journal ${escapeHtml(app.state.settings.currentJournalMonth)}`, renderRequestTable(rows, false), `
+    ${panel(`Journal ${escapeHtml(shortMonth(app.state.settings.currentJournalMonth))}`, renderRequestTable(rows, false), `
       <button class="btn" id="export-csv-btn">${icon('file-spreadsheet')}Legacy CSV</button>
     `)}
   `;
@@ -886,7 +969,7 @@ function renderAudit() {
         <tbody>
           ${rows.slice().reverse().map(item => `
             <tr>
-              <td>${escapeHtml(item.time)}</td>
+              <td>${escapeHtml(shortDateTime(item.time))}</td>
               <td>${escapeHtml(item.userName)}</td>
               <td>${escapeHtml(item.role)}</td>
               <td>${escapeHtml(item.action)}</td>
@@ -1084,7 +1167,7 @@ function renderAdmin() {
       ${panel('Backup and Monthly Journal', `
         <div class="panel-body">
           <div class="profile-line"><span>Backup frequency</span><strong>Every ${escapeHtml(settings.backupEveryMinutes)} minutes</strong></div>
-          <div class="profile-line"><span>Current journal</span><strong>${escapeHtml(settings.currentJournalMonth)}</strong></div>
+          <div class="profile-line"><span>Current journal</span><strong>${escapeHtml(shortMonth(settings.currentJournalMonth))}</strong></div>
           <div class="profile-line"><span>Excel compatibility</span><strong>${settings.excelCompatibilityMode ? 'Enabled' : 'Disabled'}</strong></div>
           <div class="profile-line"><span>Monthly table</span><strong>Created automatically</strong></div>
           <button id="manual-backup-btn" class="btn primary" style="margin-top:14px">${icon('database-backup')}Create Backup Now</button>
@@ -1098,7 +1181,7 @@ function renderFilters(scope) {
   const filter = app.filters[scope] || {};
   return `
     <div class="filter-grid" data-filter-scope="${scope}">
-      <input data-filter="date" placeholder="Date" value="${escapeHtml(filter.date || '')}">
+      <input data-filter="date" placeholder="Date 06.05.26" value="${escapeHtml(filter.date || '')}">
       <input data-filter="agent" placeholder="Agent / user" value="${escapeHtml(filter.agent || '')}">
       <input data-filter="cid" placeholder="CID" value="${escapeHtml(filter.cid || '')}">
       <select data-filter="exchange">
@@ -1123,7 +1206,7 @@ function renderFilters(scope) {
 function filteredRequests(rows) {
   const filter = app.filters.history || {};
   return rows.filter(row => {
-    return matches(row.date, filter.date)
+    return (matches(row.date, filter.date) || matches(shortDate(row.date), filter.date))
       && matches(userName(row.agentId), filter.agent)
       && matches(row.cid, filter.cid)
       && matches(row.exchange, filter.exchange)
@@ -1139,7 +1222,7 @@ function filteredAudit(rows) {
   const filter = app.filters.audit || {};
   const assetText = String(filter.asset || '');
   return rows.filter(row => {
-    return matches(row.time, filter.date)
+    return (matches(row.time, filter.date) || matches(shortDateTime(row.time), filter.date))
       && matches(row.userName, filter.agent)
       && matches(row.cid, filter.cid)
       && matches(row.action, filter.status)
@@ -1182,7 +1265,7 @@ function renderRequestTable(requests, showCopy) {
           return `
             <tr>
               <td>${escapeHtml(request.id)}</td>
-              <td>${escapeHtml(request.date)}</td>
+              <td>${escapeHtml(shortDate(request.date))}</td>
               <td>${escapeHtml(userName(request.agentId))}</td>
               <td>${escapeHtml(request.cid)}</td>
               <td>${escapeHtml(request.clientName)}</td>
@@ -1261,9 +1344,16 @@ function bindViewEvents() {
   });
 
   $all('[data-wallet-details]').forEach(button => {
-    button.addEventListener('click', () => {
-      app.selectedWalletId = button.dataset.walletDetails;
-      renderView();
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      openWalletDetailModal(button.dataset.walletDetails);
+    });
+  });
+
+  $all('[data-wallet-row]').forEach(row => {
+    row.addEventListener('click', event => {
+      if (event.target.closest('button')) return;
+      openWalletDetailModal(row.dataset.walletRow);
     });
   });
 
@@ -1299,9 +1389,7 @@ function bindViewEvents() {
   $('#client-search-input')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') runClientSearch();
   });
-  $('#add-wallet-form')?.addEventListener('submit', submitWallet);
-  $('#wallet-asset')?.addEventListener('change', event => syncAssetInputs(event.currentTarget.form));
-  if ($('#wallet-asset')) syncAssetInputs($('#add-wallet-form'));
+  $('#add-wallet-toggle')?.addEventListener('click', openWalletModal);
   $('#add-user-form')?.addEventListener('submit', submitUser);
   $('#add-brand-form')?.addEventListener('submit', submitBrand);
   $('#add-exchange-form')?.addEventListener('submit', submitExchange);
@@ -1309,8 +1397,44 @@ function bindViewEvents() {
   $('#security-form')?.addEventListener('submit', submitSecurity);
   $('#manual-backup-btn')?.addEventListener('click', createBackup);
   $('#export-csv-btn')?.addEventListener('click', exportLegacyCsv);
+}
+
+function bindWalletModalEvents() {
+  $('#add-wallet-form')?.addEventListener('submit', submitWallet);
+  $('#wallet-asset')?.addEventListener('change', event => syncAssetInputs(event.currentTarget.form));
+  if ($('#wallet-asset')) syncAssetInputs($('#add-wallet-form'));
   $('#download-wallet-template')?.addEventListener('click', downloadWalletTemplate);
   $('#upload-wallet-bulk')?.addEventListener('click', uploadBulkWallets);
+}
+
+function bindWalletDetailEvents() {
+  $all('#wallet-modal-body [data-scan-wallet]').forEach(button => {
+    button.addEventListener('click', async () => scanWallet(button.dataset.scanWallet));
+  });
+}
+
+function openWalletModal() {
+  const body = $('#wallet-modal-body');
+  if (!body) return;
+  $('#wallet-modal-title').textContent = 'Add Wallet';
+  $('#wallet-modal-subtitle').textContent = 'Add one wallet or upload a prepared wallet file.';
+  body.innerHTML = `${renderAddWalletModalSection()}${renderBulkWalletUploadSection()}`;
+  bindWalletModalEvents();
+  createIcons();
+  openModal('wallet-modal');
+}
+
+function openWalletDetailModal(walletId) {
+  const wallet = (app.state.wallets || []).find(item => item.id === walletId);
+  const body = $('#wallet-modal-body');
+  if (!wallet || !body) return;
+  app.selectedWalletId = wallet.id;
+  $('#wallet-modal-title').textContent = `Wallet ${wallet.name}`;
+  $('#wallet-modal-subtitle').textContent = `${assetLabel(wallet)} · ${wallet.status} · suffix ${walletSuffix(wallet.address)}`;
+  body.innerHTML = renderWalletDetail(wallet);
+  bindWalletDetailEvents();
+  createIcons();
+  openModal('wallet-modal');
 }
 
 function updateFilter(scope, input) {
@@ -1346,6 +1470,7 @@ async function scanWallet(walletId) {
     const result = await api(`/api/wallets/${encodeURIComponent(walletId)}/scan`, { method: 'POST', body: '{}' });
     toast('Wallet scan complete', result.scan?.message || `${result.added?.length || 0} new transaction(s).`);
     await loadState();
+    if (!$('#wallet-modal')?.classList.contains('hidden')) openWalletDetailModal(walletId);
   } catch (error) {
     toast('Wallet scan failed', error.message);
   }
@@ -1607,7 +1732,7 @@ function closeModal(id) {
 }
 
 function populateRequestModal() {
-  $('#request-date').value = todayIso();
+  $('#request-date').value = shortDate(todayIso());
   const me = currentUser();
   const agents = (app.state.users || []).filter(user => user.role === 'agent' && user.active);
   const agentField = $('[data-supervisor-field]');
@@ -1712,7 +1837,7 @@ function exportLegacyCsv() {
       userName(request.agentId),
       request.cid,
       request.clientName,
-      request.date,
+      shortDate(request.date),
       request.brand,
       request.room,
       request.depositUsd,

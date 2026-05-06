@@ -67,8 +67,18 @@ function parseOriginalAmount(value) {
 
 function assetCatalog() {
   return Object.entries(ASSET_NETWORKS).flatMap(([cryptoName, networks]) =>
-    networks.map(network => ({ crypto: cryptoName, network, label: `${cryptoName}-${network}` }))
+    networks.map(network => ({ crypto: cryptoName, network, label: assetDisplayLabel(cryptoName, network) }))
   );
+}
+
+function assetDisplayLabel(cryptoName, network) {
+  if (cryptoName === "USDT") return network ? `${cryptoName}-${network}` : cryptoName;
+  if (cryptoName === "ETH") return network ? `${cryptoName}-${network}` : cryptoName;
+  return cryptoName || "-";
+}
+
+function legacyAssetLabel(cryptoName, network) {
+  return [cryptoName, network].filter(Boolean).join("-");
 }
 
 function assetAllowed(cryptoName, network) {
@@ -88,14 +98,17 @@ function normalizedRow(row = {}) {
 function parseAssetText(assetText) {
   const clean = String(assetText || "").trim().toUpperCase();
   if (!clean) return null;
-  return assetCatalog().find(item => item.label.toUpperCase() === clean) || null;
+  return assetCatalog().find(item =>
+    item.label.toUpperCase() === clean
+    || legacyAssetLabel(item.crypto, item.network).toUpperCase() === clean
+  ) || null;
 }
 
 function defaultDb() {
   const createdAt = now();
   return {
     settings: {
-      nextRequestNumber: 2401,
+      nextRequestNumber: 2403,
       nextWalletNumber: 300,
       ipWhitelistEnabled: false,
       allowedIps: ["*"],
@@ -132,32 +145,53 @@ function defaultDb() {
     ],
     clients: [
       { cid: "884019", name: "Mark Stevens", brand: "Goldy AU", createdAt },
-      { cid: "773104", name: "George Hall", brand: "Prime Desk", createdAt }
+      { cid: "773104", name: "George Hall", brand: "Prime Desk", createdAt },
+      { cid: "991204", name: "Liam Brooks", brand: "Goldy EU", createdAt },
+      { cid: "552901", name: "Sofia Turner", brand: "Goldy AU", createdAt },
+      { cid: "662118", name: "Noah Miller", brand: "Prime Desk", createdAt }
     ],
     wallets: [
       { id: "w-usdt-trx-071", name: "USDT-TRX-071", address: "TJ7x94jK5wG5RXqLeN9bKqKqD1vB7V9aK2", crypto: "USDT", network: "TRC20", status: "frozen", cid: "884019", exchange: "Binance", requestId: "REQ-2398", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2398", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-eth-erc-022", name: "ETH-ERC-022", address: "0x7f2b2f621e9d51c03a9f3f0f5d4f1c8b7a0192c1", crypto: "ETH", network: "ERC20", status: "busy", cid: "773104", exchange: "Client's Wallet", requestId: "REQ-2399", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-usdt-trx-118", name: "USDT-TRX-118", address: "TP9m44V7cbQqfR9snQw3vRy7LxxHqAKxQ", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-usdt-trx-119", name: "USDT-TRX-119", address: "TQ8m44V7cbQqfR9snQw3vRy7LxxHqALp9", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-btc-034", name: "BTC-AU-034", address: "bc1q52t7nw0uv5q9x2p7r8kdllgk4x7u4319pk", crypto: "BTC", network: "Bitcoin", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-btc-034", name: "BTC-AU-034", address: "bc1q52t7nw0uv5q9x2p7r8kdllgk4x7u4319pk", crypto: "BTC", network: "Bitcoin", status: "frozen", cid: "991204", exchange: "Kraken", requestId: "REQ-2400", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2400", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
       { id: "w-eth-erc-188", name: "ETH-ERC-188", address: "0xb9e917a099cf67183f6b904d7b6e2c873f9217a0", crypto: "ETH", network: "ERC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-sol-044", name: "SOL-044", address: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszxj3aGkP", crypto: "SOL", network: "Solana", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-xrp-009", name: "XRP-RPL-009", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", frozenAt: "", frozenByRequestId: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
+      { id: "w-sol-044", name: "SOL-044", address: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszxj3aGkP", crypto: "SOL", network: "Solana", status: "busy", cid: "552901", exchange: "OKX", requestId: "REQ-2401", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-xrp-009", name: "XRP-RPL-009", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "frozen", cid: "662118", exchange: "Gate.io", requestId: "REQ-2402", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2402", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
     ],
     assignments: [
       { id: "as-001", cid: "884019", clientName: "Mark Stevens", brand: "Goldy AU", room: "M", agentId: "user-daniel", walletId: "w-usdt-trx-071", crypto: "USDT", network: "TRC20", exchange: "Binance", depositUsd: 8400, requestId: "REQ-2398", assignedAt: createdAt },
-      { id: "as-002", cid: "773104", clientName: "George Hall", brand: "Prime Desk", room: "T2", agentId: "user-michael", walletId: "w-eth-erc-022", crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", depositUsd: 3250, requestId: "REQ-2399", assignedAt: createdAt }
+      { id: "as-002", cid: "773104", clientName: "George Hall", brand: "Prime Desk", room: "T2", agentId: "user-michael", walletId: "w-eth-erc-022", crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", depositUsd: 4375, requestId: "REQ-2399", assignedAt: createdAt },
+      { id: "as-003", cid: "991204", clientName: "Liam Brooks", brand: "Goldy EU", room: "T", agentId: "user-anna", walletId: "w-btc-034", crypto: "BTC", network: "Bitcoin", exchange: "Kraken", depositUsd: 8330, requestId: "REQ-2400", assignedAt: createdAt },
+      { id: "as-004", cid: "552901", clientName: "Sofia Turner", brand: "Goldy AU", room: "T", agentId: "user-anna", walletId: "w-sol-044", crypto: "SOL", network: "Solana", exchange: "OKX", depositUsd: 8625, requestId: "REQ-2401", assignedAt: createdAt },
+      { id: "as-005", cid: "662118", clientName: "Noah Miller", brand: "Prime Desk", room: "M", agentId: "user-daniel", walletId: "w-xrp-009", crypto: "XRP", network: "Ripple", exchange: "Gate.io", depositUsd: 2746, requestId: "REQ-2402", assignedAt: createdAt }
     ],
     requests: [
       { id: "REQ-2398", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Mark Stevens", cid: "884019", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: true, crypto: "USDT", network: "TRC20", exchange: "Binance", originalAmount: "", depositUsd: 8400, notes: "", walletId: "w-usdt-trx-071", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
-      { id: "REQ-2399", status: "instant", date: today(), agentId: "user-michael", createdBy: "user-michael", clientName: "George Hall", cid: "773104", brand: "Prime Desk", room: "T2", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", originalAmount: "", depositUsd: 3250, notes: "", walletId: "w-eth-erc-022", rejectReason: "", approvedBy: "", createdAt, updatedAt: createdAt }
+      { id: "REQ-2399", status: "instant", date: today(), agentId: "user-michael", createdBy: "user-michael", clientName: "George Hall", cid: "773104", brand: "Prime Desk", room: "T2", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", originalAmount: "1.35", depositUsd: 4375, notes: "", walletId: "w-eth-erc-022", rejectReason: "", approvedBy: "", createdAt, updatedAt: createdAt },
+      { id: "REQ-2400", status: "approved", date: today(), agentId: "user-anna", createdBy: "user-anna", clientName: "Liam Brooks", cid: "991204", brand: "Goldy EU", room: "T", type: "Deposit", keepInWallet: true, crypto: "BTC", network: "Bitcoin", exchange: "Kraken", originalAmount: "0.105", depositUsd: 8330, notes: "Demo BTC incoming split into two TRX records.", walletId: "w-btc-034", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
+      { id: "REQ-2401", status: "approved", date: today(), agentId: "user-anna", createdBy: "user-anna", clientName: "Sofia Turner", cid: "552901", brand: "Goldy AU", room: "T", type: "Deposit", keepInWallet: false, crypto: "SOL", network: "Solana", exchange: "OKX", originalAmount: "75", depositUsd: 8625, notes: "Demo SOL incoming split into two TRX records.", walletId: "w-sol-044", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
+      { id: "REQ-2402", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Noah Miller", cid: "662118", brand: "Prime Desk", room: "M", type: "Deposit", keepInWallet: true, crypto: "XRP", network: "Ripple", exchange: "Gate.io", originalAmount: "5300", depositUsd: 2746, notes: "Demo XRP incoming split into two TRX records.", walletId: "w-xrp-009", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt }
     ],
     priceCache: {
-      USDT: { usd: 1, updatedAt: createdAt, source: "fixed" }
+      USDT: { usd: 1, updatedAt: createdAt, source: "fixed" },
+      BTC: { usd: 81530, updatedAt: createdAt, source: "demo" },
+      ETH: { usd: 2376, updatedAt: createdAt, source: "demo" },
+      SOL: { usd: 88, updatedAt: createdAt, source: "demo" },
+      XRP: { usd: 1, updatedAt: createdAt, source: "demo" }
     },
     walletTransactions: [
-      { id: "tx-001", walletId: "w-usdt-trx-071", txHash: "request:REQ-2398", amountCrypto: 8400, crypto: "USDT", network: "TRC20", priceUsdAtTx: 1, originalUsd: 8400, receivedAt: createdAt, source: "request", requestId: "REQ-2398", createdAt },
-      { id: "tx-002", walletId: "w-eth-erc-022", txHash: "request:REQ-2399", amountCrypto: 1, crypto: "ETH", network: "ERC20", priceUsdAtTx: 3250, originalUsd: 3250, receivedAt: createdAt, source: "request", requestId: "REQ-2399", createdAt }
+      { id: "tx-001", walletId: "w-usdt-trx-071", txHash: "TRX-USDT-REQ-2398-A", amountCrypto: 8400, crypto: "USDT", network: "TRC20", priceUsdAtTx: 1, originalUsd: 8400, receivedAt: createdAt, source: "request", requestId: "REQ-2398", createdAt },
+      { id: "tx-002", walletId: "w-usdt-trx-071", txHash: "TRX-USDT-SCAN-884019-B", amountCrypto: 1200, crypto: "USDT", network: "TRC20", priceUsdAtTx: 1, originalUsd: 1200, receivedAt: createdAt, source: "scan:tronscan", requestId: "", createdAt },
+      { id: "tx-003", walletId: "w-eth-erc-022", txHash: "0xeth2399a7b6e2c873f9217a0c03a9f3f0f5d4f1c8b", amountCrypto: 1, crypto: "ETH", network: "ERC20", priceUsdAtTx: 3250, originalUsd: 3250, receivedAt: createdAt, source: "request", requestId: "REQ-2399", createdAt },
+      { id: "tx-004", walletId: "w-eth-erc-022", txHash: "0xeth2399b099cf67183f6b904d7b6e2c873f9217a0", amountCrypto: 0.35, crypto: "ETH", network: "ERC20", priceUsdAtTx: 3214.29, originalUsd: 1125, receivedAt: createdAt, source: "scan:etherscan", requestId: "", createdAt },
+      { id: "tx-005", walletId: "w-btc-034", txHash: "btc2399d52t7nw0uv5q9x2p7r8kdllgk4x7u4319a", amountCrypto: 0.08, crypto: "BTC", network: "Bitcoin", priceUsdAtTx: 78500, originalUsd: 6280, receivedAt: createdAt, source: "request", requestId: "REQ-2400", createdAt },
+      { id: "tx-006", walletId: "w-btc-034", txHash: "btc2400b52t7nw0uv5q9x2p7r8kdllgk4x7u4319b", amountCrypto: 0.025, crypto: "BTC", network: "Bitcoin", priceUsdAtTx: 82000, originalUsd: 2050, receivedAt: createdAt, source: "scan:blockstream", requestId: "", createdAt },
+      { id: "tx-007", walletId: "w-sol-044", txHash: "sol2401Fc9jYqAcJ3kYq4bj73MX9bAVd86kMszxjA", amountCrypto: 60, crypto: "SOL", network: "Solana", priceUsdAtTx: 120, originalUsd: 7200, receivedAt: createdAt, source: "request", requestId: "REQ-2401", createdAt },
+      { id: "tx-008", walletId: "w-sol-044", txHash: "sol2401Fc9jYqAcJ3kYq4bj73MX9bAVd86kMszxjB", amountCrypto: 15, crypto: "SOL", network: "Solana", priceUsdAtTx: 95, originalUsd: 1425, receivedAt: createdAt, source: "scan:solscan", requestId: "", createdAt },
+      { id: "tx-009", walletId: "w-xrp-009", txHash: "xrp2402P7mA9U2J4Vj3tV6nHhTq6x4Xx42pA", amountCrypto: 4500, crypto: "XRP", network: "Ripple", priceUsdAtTx: 0.5, originalUsd: 2250, receivedAt: createdAt, source: "request", requestId: "REQ-2402", createdAt },
+      { id: "tx-010", walletId: "w-xrp-009", txHash: "xrp2402P7mA9U2J4Vj3tV6nHhTq6x4Xx42pB", amountCrypto: 800, crypto: "XRP", network: "Ripple", priceUsdAtTx: 0.62, originalUsd: 496, receivedAt: createdAt, source: "scan:xrpscan", requestId: "", createdAt }
     ],
     walletScans: [],
     audit: [
