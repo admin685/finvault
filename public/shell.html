@@ -26,9 +26,13 @@
 
       <div class="demo-users">
         <button data-demo-login="admin|admin123">Admin</button>
+        <button data-demo-login="owner|owner123">Owner</button>
         <button data-demo-login="finance|finance123">Finance</button>
         <button data-demo-login="supervisor|supervisor123">Supervisor</button>
         <button data-demo-login="daniel|agent123">Agent</button>
+        <button data-demo-login="screen_m|screen123">M Screen</button>
+        <button data-demo-login="screen_t|screen123">T Screen</button>
+        <button data-demo-login="screen_t2|screen123">T2 Screen</button>
       </div>
       <p class="micro-copy">Default admin: admin / admin123</p>
     </section>
@@ -64,11 +68,11 @@
           <p id="page-subtitle">FinVault</p>
         </div>
         <div class="top-actions">
-          <button id="open-request-top" class="btn primary">
+          <button id="open-request-top" class="btn primary" type="button">
             <i data-lucide="plus"></i>
             New Request
           </button>
-          <button id="refresh-btn" class="btn ghost">
+          <button id="refresh-btn" class="btn ghost" type="button">
             <i data-lucide="refresh-cw"></i>
             Refresh
           </button>
@@ -98,7 +102,7 @@
         <div class="notice-row">
           <div class="notice info">
             <strong>CID check</strong>
-            <span>System checks CID + asset + exchange.</span>
+            <span>System checks CID + asset. Deposits also check exchange.</span>
           </div>
           <div class="notice warning">
             <strong>Reserved</strong>
@@ -131,7 +135,7 @@
             Brand
             <select name="brand" id="request-brand" required></select>
           </label>
-          <label>
+          <label id="request-room-field">
             Room
             <select name="room" id="request-room" required></select>
           </label>
@@ -151,13 +155,24 @@
           </label>
           <label>
             Asset
-            <select name="asset" id="request-asset" required></select>
+            <select name="asset" id="request-asset" class="asset-select" required></select>
           </label>
           <input type="hidden" name="crypto">
           <input type="hidden" name="network">
-          <label>
+          <label id="request-exchange-field">
             Exchange
             <select name="exchange" id="request-exchange" required></select>
+          </label>
+          <label id="request-withdraw-address-field" class="span-2 hidden">
+            Withdraw wallet
+            <div class="input-action">
+              <input id="request-withdraw-address" name="withdrawAddress" placeholder="Paste wallet address before choosing coin">
+              <button id="detect-withdraw-wallet-btn" class="btn" type="button">
+                <i data-lucide="scan-search"></i>
+                Detect
+              </button>
+            </div>
+            <span id="withdraw-detect-summary" class="field-hint"></span>
           </label>
           <label id="request-usd-field">
             <span id="request-usd-label">Deposit USD</span>
@@ -190,6 +205,30 @@
     </section>
   </div>
 
+  <div id="asset-confirm-modal" class="modal-backdrop hidden">
+    <section class="modal small">
+      <header class="modal-header">
+        <div>
+          <h2 id="asset-confirm-title">Confirm Asset</h2>
+          <p id="asset-confirm-text">Confirm detected asset before submitting.</p>
+        </div>
+        <button class="icon-btn" data-close-modal="asset-confirm-modal" title="Close">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <div class="modal-body">
+        <div id="asset-confirm-card" class="asset-confirm-card"></div>
+        <footer class="modal-footer">
+          <button class="btn ghost" type="button" data-close-modal="asset-confirm-modal">Cancel</button>
+          <button id="confirm-detected-asset-btn" class="btn primary" type="button">
+            <i data-lucide="check"></i>
+            Confirm
+          </button>
+        </footer>
+      </div>
+    </section>
+  </div>
+
   <div id="wallet-modal" class="modal-backdrop hidden">
     <section class="modal wallet">
       <header class="modal-header">
@@ -202,6 +241,37 @@
         </button>
       </header>
       <div id="wallet-modal-body" class="modal-body"></div>
+    </section>
+  </div>
+
+  <div id="user-modal" class="modal-backdrop hidden">
+    <section class="modal small">
+      <header class="modal-header">
+        <div>
+          <h2 id="user-modal-title">Create User / Agent</h2>
+          <p id="user-modal-subtitle">Create or edit access without changing historical records.</p>
+        </div>
+        <button class="icon-btn" data-close-modal="user-modal" title="Close">
+          <i data-lucide="x"></i>
+        </button>
+      </header>
+      <form id="user-form" class="modal-body">
+        <input type="hidden" name="userId">
+        <div id="user-modal-fields" class="form-grid user-modal-grid"></div>
+        <footer class="modal-footer">
+          <button id="user-modal-delete" class="btn danger" type="button">
+            <i data-lucide="trash-2"></i>
+            Delete
+          </button>
+          <div class="right-actions">
+            <button class="btn ghost" type="button" data-close-modal="user-modal">Cancel</button>
+            <button id="user-modal-submit" class="btn primary" type="submit">
+              <i data-lucide="save"></i>
+              Save
+            </button>
+          </div>
+        </footer>
+      </form>
     </section>
   </div>
 

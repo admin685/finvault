@@ -51,6 +51,16 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function daysAgo(days) {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dayStamp(days, time = "11:00:00") {
+  return `${daysAgo(days)}T${time}`;
+}
+
 function currentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
@@ -65,12 +75,20 @@ function roundMoney(value) {
   return Math.round(toNumber(value) * 100) / 100;
 }
 
+function nonNegativeMoney(value) {
+  return Math.max(0, roundMoney(value));
+}
+
 function roundCrypto(value) {
   return Math.round(toNumber(value) * 100000000) / 100000000;
 }
 
+function nonNegativeCrypto(value) {
+  return Math.max(0, roundCrypto(value));
+}
+
 function parseOriginalAmount(value) {
-  return roundCrypto(toNumber(value, 0));
+  return nonNegativeCrypto(toNumber(value, 0));
 }
 
 function isWithdrawType(type) {
@@ -120,12 +138,27 @@ function parseAssetText(assetText) {
   ) || null;
 }
 
+function cleanWalletAddress(value) {
+  return String(value || "").trim().replace(/\s+/g, "");
+}
+
+function detectWalletAddressAsset(address) {
+  const value = cleanWalletAddress(address);
+  if (!value) return null;
+  if (/^0x[a-fA-F0-9]{40}$/.test(value)) return { crypto: "ETH", network: "ERC20", confidence: "medium" };
+  if (/^(bc1)[a-z0-9]{25,90}$/i.test(value) || /^[13][a-km-zA-HJ-NP-Z1-9]{25,40}$/.test(value)) return { crypto: "BTC", network: "Bitcoin", confidence: "high" };
+  if (/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(value)) return { crypto: "XRP", network: "Ripple", confidence: "high" };
+  if (/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value)) return { crypto: "USDT", network: "TRC20", confidence: "medium" };
+  if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value)) return { crypto: "SOL", network: "Solana", confidence: "medium" };
+  return null;
+}
+
 function defaultDb() {
   const createdAt = now();
-  return {
+  const db = {
     settings: {
       nextRequestNumber: 2403,
-      nextWalletNumber: 300,
+      nextWalletNumber: 9,
       ipWhitelistEnabled: false,
       allowedIps: ["*"],
       backupEveryMinutes: 60,
@@ -152,10 +185,14 @@ function defaultDb() {
     ].map(name => ({ id: `ex-${name.replace(/[^a-z0-9]/gi, "").toLowerCase()}`, name, active: true })),
     users: [
       { id: "user-admin", username: "admin", password: "admin123", fullName: "System Admin", role: "admin", team: "Ops", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+      { id: "user-owner", username: "owner", password: "owner123", fullName: "Business Owner", role: "owner", team: "Ownership", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-finance", username: "finance", password: "finance123", fullName: "Finance Manager", role: "finance", team: "Finance", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-supervisor", username: "supervisor", password: "supervisor123", fullName: "Room M Manager", role: "supervisor", team: "M", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-supervisor-t", username: "supervisor_t", password: "supervisor123", fullName: "Room T Manager", role: "supervisor", team: "T", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-supervisor-t2", username: "supervisor_t2", password: "supervisor123", fullName: "Room T2 Manager", role: "supervisor", team: "T2", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+      { id: "user-screen-m", username: "screen_m", password: "screen123", fullName: "Room M Screen", role: "room_screen", team: "M", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+      { id: "user-screen-t", username: "screen_t", password: "screen123", fullName: "Room T Screen", role: "room_screen", team: "T", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+      { id: "user-screen-t2", username: "screen_t2", password: "screen123", fullName: "Room T2 Screen", role: "room_screen", team: "T2", active: true, monthlyTarget: 0, brandAccess: ["All"] },
       { id: "user-daniel", username: "daniel", password: "agent123", fullName: "Daniel Reed", role: "agent", team: "M", active: true, monthlyTarget: 100000, brandAccess: ["All"] },
       { id: "user-olivia", username: "olivia", password: "agent123", fullName: "Olivia Hart", role: "agent", team: "M", active: true, monthlyTarget: 90000, brandAccess: ["All"] },
       { id: "user-ethan", username: "ethan", password: "agent123", fullName: "Ethan Cole", role: "agent", team: "M", active: true, monthlyTarget: 95000, brandAccess: ["All"] },
@@ -174,14 +211,14 @@ function defaultDb() {
       { cid: "662118", name: "Noah Miller", brand: "Prime Desk", createdAt }
     ],
     wallets: [
-      { id: "w-usdt-trx-071", name: "USDT-TRX-071", address: "TJ7x94jK5wG5RXqLeN9bKqKqD1vB7V9aK2", crypto: "USDT", network: "TRC20", status: "frozen", cid: "884019", exchange: "Binance", requestId: "REQ-2398", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2398", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-eth-erc-022", name: "ETH-ERC-022", address: "0x7f2b2f621e9d51c03a9f3f0f5d4f1c8b7a0192c1", crypto: "ETH", network: "ERC20", status: "busy", cid: "773104", exchange: "Client's Wallet", requestId: "REQ-2399", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-usdt-trx-118", name: "USDT-TRX-118", address: "TP9m44V7cbQqfR9snQw3vRy7LxxHqAKxQ", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-usdt-trx-119", name: "USDT-TRX-119", address: "TQ8m44V7cbQqfR9snQw3vRy7LxxHqALp9", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-btc-034", name: "BTC-AU-034", address: "bc1q52t7nw0uv5q9x2p7r8kdllgk4x7u4319pk", crypto: "BTC", network: "Bitcoin", status: "frozen", cid: "991204", exchange: "Kraken", requestId: "REQ-2400", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2400", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-eth-erc-188", name: "ETH-ERC-188", address: "0xb9e917a099cf67183f6b904d7b6e2c873f9217a0", crypto: "ETH", network: "ERC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-sol-044", name: "SOL-044", address: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszxj3aGkP", crypto: "SOL", network: "Solana", status: "busy", cid: "552901", exchange: "OKX", requestId: "REQ-2401", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
-      { id: "w-xrp-009", name: "XRP-RPL-009", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "frozen", cid: "662118", exchange: "Gate.io", requestId: "REQ-2402", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2402", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
+      { id: "w-usdt-trx-071", name: "FK-1", address: "TJ7x94jK5wG5RXqLeN9bKqKqD1vB7V9aK2", crypto: "USDT", network: "TRC20", status: "frozen", cid: "884019", exchange: "Binance", requestId: "REQ-2398", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2398", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-eth-erc-022", name: "FK-2", address: "0x7f2b2f621e9d51c03a9f3f0f5d4f1c8b7a0192c1", crypto: "ETH", network: "ERC20", status: "busy", cid: "773104", exchange: "Client's Wallet", requestId: "REQ-2399", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-usdt-trx-118", name: "FK-3", address: "TP9m44V7cbQqfR9snQw3vRy7LxxHqAKxQ", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-usdt-trx-119", name: "FK-4", address: "TQ8m44V7cbQqfR9snQw3vRy7LxxHqALp9", crypto: "USDT", network: "TRC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-btc-034", name: "FK-5", address: "bc1q52t7nw0uv5q9x2p7r8kdllgk4x7u4319pk", crypto: "BTC", network: "Bitcoin", status: "frozen", cid: "991204", exchange: "Kraken", requestId: "REQ-2400", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2400", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-eth-erc-188", name: "FK-6", address: "0xb9e917a099cf67183f6b904d7b6e2c873f9217a0", crypto: "ETH", network: "ERC20", status: "free", cid: "", exchange: "", requestId: "", issuedToClientAt: "", firstAccessAt: "", archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-sol-044", name: "FK-7", address: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszxj3aGkP", crypto: "SOL", network: "Solana", status: "busy", cid: "552901", exchange: "OKX", requestId: "REQ-2401", issuedToClientAt: createdAt, firstAccessAt: createdAt, archivedReason: "", archivedBy: "", archivedAt: "", createdAt },
+      { id: "w-xrp-009", name: "FK-8", address: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx42p", crypto: "XRP", network: "Ripple", status: "frozen", cid: "662118", exchange: "Gate.io", requestId: "REQ-2402", issuedToClientAt: createdAt, firstAccessAt: createdAt, frozenAt: createdAt, frozenByRequestId: "REQ-2402", archivedReason: "", archivedBy: "", archivedAt: "", createdAt }
     ],
     assignments: [
       { id: "as-001", cid: "884019", clientName: "Mark Stevens", brand: "Goldy AU", room: "M", agentId: "user-daniel", walletId: "w-usdt-trx-071", crypto: "USDT", network: "TRC20", exchange: "Binance", depositUsd: 8400, requestId: "REQ-2398", assignedAt: createdAt },
@@ -195,7 +232,19 @@ function defaultDb() {
       { id: "REQ-2399", status: "instant", date: today(), agentId: "user-michael", createdBy: "user-michael", clientName: "George Hall", cid: "773104", brand: "Prime Desk", room: "T2", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Client's Wallet", originalAmount: "1.35", depositUsd: 4375, notes: "", walletId: "w-eth-erc-022", rejectReason: "", approvedBy: "", createdAt, updatedAt: createdAt },
       { id: "REQ-2400", status: "approved", date: today(), agentId: "user-anna", createdBy: "user-anna", clientName: "Liam Brooks", cid: "991204", brand: "Goldy EU", room: "T", type: "Deposit", keepInWallet: true, crypto: "BTC", network: "Bitcoin", exchange: "Kraken", originalAmount: "0.105", depositUsd: 8330, notes: "Demo BTC incoming split into two TRX records.", walletId: "w-btc-034", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
       { id: "REQ-2401", status: "approved", date: today(), agentId: "user-anna", createdBy: "user-anna", clientName: "Sofia Turner", cid: "552901", brand: "Goldy AU", room: "T", type: "Deposit", keepInWallet: false, crypto: "SOL", network: "Solana", exchange: "OKX", originalAmount: "75", depositUsd: 8625, notes: "Demo SOL incoming split into two TRX records.", walletId: "w-sol-044", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
-      { id: "REQ-2402", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Noah Miller", cid: "662118", brand: "Prime Desk", room: "M", type: "Deposit", keepInWallet: true, crypto: "XRP", network: "Ripple", exchange: "Gate.io", originalAmount: "5300", depositUsd: 2746, notes: "Demo XRP incoming split into two TRX records.", walletId: "w-xrp-009", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt }
+      { id: "REQ-2402", status: "approved", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Noah Miller", cid: "662118", brand: "Prime Desk", room: "M", type: "Deposit", keepInWallet: true, crypto: "XRP", network: "Ripple", exchange: "Gate.io", originalAmount: "5300", depositUsd: 2746, notes: "Demo XRP incoming split into two TRX records.", walletId: "w-xrp-009", rejectReason: "", approvedBy: "user-finance", createdAt, updatedAt: createdAt },
+      { id: "REQ-2380", status: "approved", date: daysAgo(6), agentId: "user-olivia", createdBy: "user-olivia", clientName: "Demo Client 2380", cid: "730180", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: false, crypto: "USDT", network: "TRC20", exchange: "Binance", originalAmount: "18500", depositUsd: 18500, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(6, "10:05:00"), updatedAt: dayStamp(6, "10:22:00") },
+      { id: "REQ-2381", status: "approved", date: daysAgo(6), agentId: "user-ethan", createdBy: "user-ethan", clientName: "Demo WD 2381", cid: "730181", brand: "Goldy EU", room: "M", type: "Withdraw", keepInWallet: false, crypto: "BTC", network: "Bitcoin", exchange: "", originalAmount: "0.022", depositUsd: 1800, withdrawAddress: "bc1qdemo2381withdrawflow000000000000000001", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(6, "14:10:00"), updatedAt: dayStamp(6, "14:26:00") },
+      { id: "REQ-2382", status: "approved", date: daysAgo(5), agentId: "user-anna", createdBy: "user-anna", clientName: "Demo Client 2382", cid: "730182", brand: "Goldy EU", room: "T", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Kraken", originalAmount: "10.18", depositUsd: 24200, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(5, "09:40:00"), updatedAt: dayStamp(5, "10:01:00") },
+      { id: "REQ-2383", status: "approved", date: daysAgo(5), agentId: "user-mia", createdBy: "user-mia", clientName: "Demo WD 2383", cid: "730183", brand: "Prime Desk", room: "T", type: "Withdraw", keepInWallet: false, crypto: "SOL", network: "Solana", exchange: "", originalAmount: "35.2", depositUsd: 3100, withdrawAddress: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszflow5", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(5, "16:35:00"), updatedAt: dayStamp(5, "16:44:00") },
+      { id: "REQ-2384", status: "approved", date: daysAgo(4), agentId: "user-lucas", createdBy: "user-lucas", clientName: "Demo Client 2384", cid: "730184", brand: "Goldy AU", room: "T", type: "Deposit", keepInWallet: false, crypto: "USDT", network: "ERC20", exchange: "OKX", originalAmount: "21800", depositUsd: 21800, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(4, "11:20:00"), updatedAt: dayStamp(4, "11:41:00") },
+      { id: "REQ-2385", status: "approved", date: daysAgo(4), agentId: "user-michael", createdBy: "user-michael", clientName: "Demo WD 2385", cid: "730185", brand: "Prime Desk", room: "T2", type: "Withdraw", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "", originalAmount: "1.09", depositUsd: 2600, withdrawAddress: "0x1111111111111111111111111111111111232385", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(4, "15:50:00"), updatedAt: dayStamp(4, "16:04:00") },
+      { id: "REQ-2386", status: "approved", date: daysAgo(3), agentId: "user-ava", createdBy: "user-ava", clientName: "Demo Client 2386", cid: "730186", brand: "Goldy EU", room: "T2", type: "Deposit", keepInWallet: false, crypto: "BTC", network: "Bitcoin", exchange: "Bybit", originalAmount: "0.343", depositUsd: 28000, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(3, "10:12:00"), updatedAt: dayStamp(3, "10:28:00") },
+      { id: "REQ-2387", status: "approved", date: daysAgo(3), agentId: "user-james", createdBy: "user-james", clientName: "Demo WD 2387", cid: "730187", brand: "Goldy AU", room: "T2", type: "Withdraw", keepInWallet: false, crypto: "XRP", network: "Ripple", exchange: "", originalAmount: "4400", depositUsd: 4400, withdrawAddress: "rN8kP7mA9U2J4Vj3tV6nHhTq6x4Xx2387", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(3, "17:05:00"), updatedAt: dayStamp(3, "17:20:00") },
+      { id: "REQ-2388", status: "approved", date: daysAgo(2), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Demo Client 2388", cid: "730188", brand: "Prime Desk", room: "M", type: "Deposit", keepInWallet: false, crypto: "USDT", network: "BEP20", exchange: "KuCoin", originalAmount: "25900", depositUsd: 25900, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(2, "09:30:00"), updatedAt: dayStamp(2, "09:51:00") },
+      { id: "REQ-2389", status: "approved", date: daysAgo(2), agentId: "user-olivia", createdBy: "user-olivia", clientName: "Demo WD 2389", cid: "730189", brand: "Goldy EU", room: "M", type: "Withdraw", keepInWallet: false, crypto: "SOL", network: "Solana", exchange: "", originalAmount: "34.1", depositUsd: 3000, withdrawAddress: "7nV2tKFc9jYqAcJ3kYq4bj73MX9bAVd86kMszflow2", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(2, "14:45:00"), updatedAt: dayStamp(2, "15:02:00") },
+      { id: "REQ-2390", status: "approved", date: daysAgo(1), agentId: "user-ethan", createdBy: "user-ethan", clientName: "Demo Client 2390", cid: "730190", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Gate.io", originalAmount: "13.13", depositUsd: 31200, notes: "Demo flow history.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(1, "10:55:00"), updatedAt: dayStamp(1, "11:09:00") },
+      { id: "REQ-2391", status: "approved", date: daysAgo(1), agentId: "user-mia", createdBy: "user-mia", clientName: "Demo WD 2391", cid: "730191", brand: "Prime Desk", room: "T", type: "Withdraw", keepInWallet: false, crypto: "BTC", network: "Bitcoin", exchange: "", originalAmount: "0.067", depositUsd: 5500, withdrawAddress: "bc1qdemo2391withdrawflow000000000000000001", notes: "Demo withdrawal flow.", walletId: "", rejectReason: "", approvedBy: "user-finance", createdAt: dayStamp(1, "18:15:00"), updatedAt: dayStamp(1, "18:29:00") }
     ],
     priceCache: {
       USDT: { usd: 1, updatedAt: createdAt, source: "fixed" },
@@ -223,6 +272,190 @@ function defaultDb() {
     alerts: [],
     journals: [{ month: currentMonth(), status: "open", createdAt }]
   };
+  seedWorkingDemoData(db, createdAt);
+  return db;
+}
+
+function seedWorkingDemoData(db, createdAt) {
+  db.settings.nextRequestNumber = Math.max(Number(db.settings.nextRequestNumber || 0), 2406);
+  db.settings.nextWalletNumber = Math.max(Number(db.settings.nextWalletNumber || 0), 34);
+
+  const demoClients = [
+    ["730180", "Demo Client 2380", "Goldy AU"],
+    ["730181", "Demo WD 2381", "Goldy EU"],
+    ["730182", "Demo Client 2382", "Goldy EU"],
+    ["730183", "Demo WD 2383", "Prime Desk"],
+    ["730184", "Demo Client 2384", "Goldy AU"],
+    ["730185", "Demo WD 2385", "Prime Desk"],
+    ["730186", "Demo Client 2386", "Goldy EU"],
+    ["730187", "Demo WD 2387", "Goldy AU"],
+    ["730188", "Demo Client 2388", "Prime Desk"],
+    ["730189", "Demo WD 2389", "Goldy EU"],
+    ["730190", "Demo Client 2390", "Goldy AU"],
+    ["730191", "Demo WD 2391", "Prime Desk"],
+    ["730203", "Pending Mark AU", "Goldy AU"],
+    ["730204", "Pending Lina EU", "Goldy EU"],
+    ["730205", "Pending Victor WD", "Prime Desk"],
+    ["730192", "Rejected Nina Fox", "Goldy AU"]
+  ];
+  for (const [cid, name, brand] of demoClients) {
+    if (!db.clients.some(client => client.cid === cid)) db.clients.push({ cid, name, brand, createdAt });
+  }
+
+  const issuedDemoWallets = [
+    {
+      requestId: "REQ-2380",
+      wallet: { id: "w-demo-2380", name: "FK-9", address: "TDEMO2380USDTTRC20FLOW000000000000000A", crypto: "USDT", network: "TRC20", status: "busy" },
+      tx: { txHash: "TRX-DEMO-2380-SCAN-B", amountCrypto: 1400, priceUsdAtTx: 1, originalUsd: 1400, source: "scan:tronscan" }
+    },
+    {
+      requestId: "REQ-2382",
+      wallet: { id: "w-demo-2382", name: "FK-10", address: "0x2382000000000000000000000000000000002382", crypto: "ETH", network: "ERC20", status: "frozen" },
+      tx: { txHash: "0xscan23820000000000000000000000000000000000", amountCrypto: 0.42, priceUsdAtTx: 2420, originalUsd: 1016.4, source: "scan:etherscan" }
+    },
+    {
+      requestId: "REQ-2384",
+      wallet: { id: "w-demo-2384", name: "FK-11", address: "0x2384000000000000000000000000000000002384", crypto: "USDT", network: "ERC20", status: "busy" },
+      tx: { txHash: "0xscan23840000000000000000000000000000000000", amountCrypto: 900, priceUsdAtTx: 1, originalUsd: 900, source: "scan:etherscan" }
+    },
+    {
+      requestId: "REQ-2386",
+      wallet: { id: "w-demo-2386", name: "FK-12", address: "bc1qdemo2386issuedwallet00000000000000000001", crypto: "BTC", network: "Bitcoin", status: "frozen" },
+      tx: { txHash: "btc-demo-2386-scan-b", amountCrypto: 0.018, priceUsdAtTx: 80500, originalUsd: 1449, source: "scan:blockstream" }
+    },
+    {
+      requestId: "REQ-2388",
+      wallet: { id: "w-demo-2388", name: "FK-13", address: "0x2388000000000000000000000000000000002388", crypto: "USDT", network: "BEP20", status: "busy" },
+      tx: { txHash: "bep20-demo-2388-scan-b", amountCrypto: 2200, priceUsdAtTx: 1, originalUsd: 2200, source: "scan:bscscan" }
+    },
+    {
+      requestId: "REQ-2390",
+      wallet: { id: "w-demo-2390", name: "FK-14", address: "0x2390000000000000000000000000000000002390", crypto: "ETH", network: "ERC20", status: "frozen" },
+      tx: { txHash: "0xscan23900000000000000000000000000000000000", amountCrypto: 0.64, priceUsdAtTx: 2375, originalUsd: 1520, source: "scan:etherscan" }
+    }
+  ];
+
+  for (const item of issuedDemoWallets) {
+    const request = db.requests.find(entry => entry.id === item.requestId);
+    if (!request) continue;
+    request.walletId = item.wallet.id;
+    request.keepInWallet = item.wallet.status === "frozen";
+    item.wallet.cid = request.cid;
+    item.wallet.exchange = request.exchange;
+    item.wallet.requestId = request.id;
+    item.wallet.issuedToClientAt = request.updatedAt || request.createdAt || createdAt;
+    item.wallet.firstAccessAt = request.updatedAt || request.createdAt || createdAt;
+    item.wallet.frozenAt = item.wallet.status === "frozen" ? item.wallet.issuedToClientAt : "";
+    item.wallet.frozenByRequestId = item.wallet.status === "frozen" ? request.id : "";
+    item.wallet.archivedReason = "";
+    item.wallet.archivedBy = "";
+    item.wallet.archivedAt = "";
+    item.wallet.createdAt = request.createdAt || createdAt;
+    if (!db.wallets.some(wallet => wallet.id === item.wallet.id)) db.wallets.push(item.wallet);
+    if (!db.assignments.some(assignment => assignment.requestId === request.id)) {
+      db.assignments.push({
+        id: `as-${request.id.toLowerCase()}`,
+        cid: request.cid,
+        clientName: request.clientName,
+        brand: request.brand,
+        room: request.room,
+        agentId: request.agentId,
+        walletId: item.wallet.id,
+        crypto: request.crypto,
+        network: request.network,
+        exchange: request.exchange,
+        depositUsd: request.depositUsd,
+        requestId: request.id,
+        assignedAt: request.updatedAt || request.createdAt || createdAt
+      });
+    }
+    if (!db.walletTransactions.some(tx => tx.walletId === item.wallet.id && tx.txHash === item.tx.txHash)) {
+      db.walletTransactions.push({
+        id: `tx-${request.id.toLowerCase()}-scan`,
+        walletId: item.wallet.id,
+        txHash: item.tx.txHash,
+        amountCrypto: item.tx.amountCrypto,
+        crypto: request.crypto,
+        network: request.network,
+        priceUsdAtTx: item.tx.priceUsdAtTx,
+        originalUsd: item.tx.originalUsd,
+        receivedAt: request.updatedAt || request.createdAt || createdAt,
+        source: item.tx.source,
+        requestId: "",
+        createdAt: request.updatedAt || request.createdAt || createdAt
+      });
+    }
+    if (!db.walletScans.some(scan => scan.walletId === item.wallet.id)) {
+      db.walletScans.push({
+        id: `scan-${request.id.toLowerCase()}`,
+        walletId: item.wallet.id,
+        provider: item.tx.source.replace("scan:", ""),
+        status: "completed",
+        found: 2,
+        added: 1,
+        message: `Demo scan found 2 transfer(s), added 1 for ${item.wallet.name}.`,
+        scannedBy: "user-finance",
+        scannedAt: request.updatedAt || request.createdAt || createdAt
+      });
+    }
+  }
+
+  const moreWallets = [
+    { id: "w-reserved-2403", name: "FK-15", address: "TRES2403USDTTRC20FLOW000000000000000A", crypto: "USDT", network: "TRC20", status: "reserved", cid: "730203", exchange: "Binance", requestId: "REQ-2403" },
+    { id: "w-reserved-2404", name: "FK-16", address: "0x2404000000000000000000000000000000002404", crypto: "ETH", network: "ERC20", status: "reserved", cid: "730204", exchange: "Kraken", requestId: "REQ-2404" },
+    { id: "w-free-usdt-erc-017", name: "FK-17", address: "0xfree170000000000000000000000000000000017", crypto: "USDT", network: "ERC20", status: "free", cid: "", exchange: "", requestId: "" },
+    { id: "w-free-usdt-bep-018", name: "FK-18", address: "0xfree180000000000000000000000000000000018", crypto: "USDT", network: "BEP20", status: "free", cid: "", exchange: "", requestId: "" },
+    { id: "w-free-btc-019", name: "FK-19", address: "bc1qfree019walletpool0000000000000000000001", crypto: "BTC", network: "Bitcoin", status: "free", cid: "", exchange: "", requestId: "" },
+    { id: "w-free-sol-020", name: "FK-20", address: "7FreeSolWallet020Flow00000000000000000000001", crypto: "SOL", network: "Solana", status: "free", cid: "", exchange: "", requestId: "" },
+    { id: "w-free-xrp-021", name: "FK-21", address: "rFreeXrpWallet021Flow000000000000000001", crypto: "XRP", network: "Ripple", status: "free", cid: "", exchange: "", requestId: "" }
+  ];
+  for (const wallet of moreWallets) {
+    const fullWallet = {
+      issuedToClientAt: "",
+      firstAccessAt: "",
+      frozenAt: "",
+      frozenByRequestId: "",
+      archivedReason: "",
+      archivedBy: "",
+      archivedAt: "",
+      createdAt,
+      ...wallet
+    };
+    if (!db.wallets.some(entry => entry.id === fullWallet.id)) db.wallets.push(fullWallet);
+  }
+
+  const liveRequests = [
+    { id: "REQ-2403", status: "pending", date: today(), agentId: "user-daniel", createdBy: "user-daniel", clientName: "Pending Mark AU", cid: "730203", brand: "Goldy AU", room: "M", type: "Deposit", keepInWallet: true, crypto: "USDT", network: "TRC20", exchange: "Binance", originalAmount: "9100", depositUsd: 9100, notes: "Pending wallet request: reserved wallet awaits finance approval.", walletId: "w-reserved-2403", rejectReason: "", approvedBy: "", createdAt: dayStamp(0, "09:18:00"), updatedAt: dayStamp(0, "09:18:00") },
+    { id: "REQ-2404", status: "pending", date: today(), agentId: "user-lucas", createdBy: "user-supervisor-t", clientName: "Pending Lina EU", cid: "730204", brand: "Goldy EU", room: "T", type: "Deposit", keepInWallet: false, crypto: "ETH", network: "ERC20", exchange: "Kraken", originalAmount: "6.31", depositUsd: 15000, notes: "Supervisor created this request for Lucas.", walletId: "w-reserved-2404", rejectReason: "", approvedBy: "", createdAt: dayStamp(0, "10:36:00"), updatedAt: dayStamp(0, "10:36:00") },
+    { id: "REQ-2405", status: "pending", date: today(), agentId: "user-ava", createdBy: "user-ava", clientName: "Pending Victor WD", cid: "730205", brand: "Prime Desk", room: "T2", type: "Withdraw", keepInWallet: false, crypto: "BTC", network: "Bitcoin", exchange: "", originalAmount: "0.041", depositUsd: 3343, withdrawAddress: "bc1qpending2405withdrawflow000000000000000001", notes: "Pending crypto withdrawal request.", walletId: "", rejectReason: "", approvedBy: "", createdAt: dayStamp(0, "11:05:00"), updatedAt: dayStamp(0, "11:05:00") },
+    { id: "REQ-2392", status: "rejected", date: daysAgo(1), agentId: "user-james", createdBy: "user-james", clientName: "Rejected Nina Fox", cid: "730192", brand: "Goldy AU", room: "T2", type: "Deposit", keepInWallet: false, crypto: "SOL", network: "Solana", exchange: "OKX", originalAmount: "95", depositUsd: 8360, notes: "Rejected demo request.", walletId: "", rejectReason: "Wrong client confirmation document.", approvedBy: "", createdAt: dayStamp(1, "12:20:00"), updatedAt: dayStamp(1, "12:44:00") }
+  ];
+  for (const request of liveRequests) {
+    if (!db.requests.some(entry => entry.id === request.id)) db.requests.push(request);
+  }
+
+  const auditItems = [
+    ["audit-010", dayStamp(6, "10:22:00"), "user-finance", "Finance Manager", "finance", "request_approved_wallet_assigned", "Approved demo wallet request for Room M.", "730180", "w-demo-2380", "REQ-2380"],
+    ["audit-011", dayStamp(5, "10:01:00"), "user-finance", "Finance Manager", "finance", "request_approved_wallet_assigned", "Approved and froze demo wallet for Room T.", "730182", "w-demo-2382", "REQ-2382"],
+    ["audit-012", dayStamp(4, "16:04:00"), "user-finance", "Finance Manager", "finance", "withdraw_request_approved", "Approved demo crypto withdrawal.", "730185", "", "REQ-2385"],
+    ["audit-013", dayStamp(2, "15:02:00"), "user-finance", "Finance Manager", "finance", "withdraw_request_approved", "Approved demo crypto withdrawal.", "730189", "", "REQ-2389"],
+    ["audit-014", dayStamp(1, "12:44:00"), "user-finance", "Finance Manager", "finance", "request_rejected", "Rejected demo request: wrong confirmation document.", "730192", "", "REQ-2392"],
+    ["audit-015", dayStamp(0, "09:18:00"), "user-daniel", "Daniel Reed", "agent", "request_created_wallet_reserved", "Reserved FK-15 for approval.", "730203", "w-reserved-2403", "REQ-2403"],
+    ["audit-016", dayStamp(0, "10:36:00"), "user-supervisor-t", "Room T Manager", "supervisor", "request_created_wallet_reserved", "Supervisor reserved FK-16 for Lucas.", "730204", "w-reserved-2404", "REQ-2404"],
+    ["audit-017", dayStamp(0, "11:05:00"), "user-ava", "Ava Price", "agent", "withdraw_request_created", "Created pending BTC withdrawal request.", "730205", "", "REQ-2405"]
+  ];
+  for (const [id, time, userId, userName, role, action, details, cid, walletId, requestId] of auditItems) {
+    if (!db.audit.some(item => item.id === id)) db.audit.push({ id, time, userId, userName, role, action, cid, walletId, requestId, details, ip: "demo" });
+  }
+
+  const alerts = [
+    { id: "alert-demo-001", level: "warning", title: "2 wallet requests pending", message: "Room M and Room T have reserved wallets waiting for finance approval.", targetRoles: ["finance", "admin"], createdAt: dayStamp(0, "10:36:00"), read: false },
+    { id: "alert-demo-002", level: "danger", title: "BTC withdrawal pending", message: "Room T2 has a BTC withdrawal waiting for approval.", targetRoles: ["finance", "admin"], createdAt: dayStamp(0, "11:05:00"), read: false },
+    { id: "alert-demo-003", level: "warning", title: "ETH ERC20 pool low", message: "Only a small number of free ETH-ERC20 wallets remain after current reservations.", targetRoles: ["finance", "admin"], createdAt: dayStamp(0, "11:12:00"), read: false }
+  ];
+  for (const alert of alerts) {
+    if (!db.alerts.some(item => item.id === alert.id)) db.alerts.push(alert);
+  }
 }
 
 function normalizeDb(db) {
@@ -232,13 +465,40 @@ function normalizeDb(db) {
   db.wallets = db.wallets || [];
   db.assignments = db.assignments || [];
   db.requests = db.requests || [];
+  db.users = db.users || [];
+  const requiredDemoUsers = [
+    { id: "user-owner", username: "owner", password: "owner123", fullName: "Business Owner", role: "owner", team: "Ownership", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+    { id: "user-screen-m", username: "screen_m", password: "screen123", fullName: "Room M Screen", role: "room_screen", team: "M", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+    { id: "user-screen-t", username: "screen_t", password: "screen123", fullName: "Room T Screen", role: "room_screen", team: "T", active: true, monthlyTarget: 0, brandAccess: ["All"] },
+    { id: "user-screen-t2", username: "screen_t2", password: "screen123", fullName: "Room T2 Screen", role: "room_screen", team: "T2", active: true, monthlyTarget: 0, brandAccess: ["All"] }
+  ];
+  for (const requiredUser of requiredDemoUsers) {
+    if (db.users.some(user => user.id === requiredUser.id || user.username === requiredUser.username)) continue;
+    const firstAgentIndex = db.users.findIndex(user => user.role === "agent");
+    const insertAt = requiredUser.role === "owner"
+      ? Math.min(1, db.users.length)
+      : (firstAgentIndex >= 0 ? firstAgentIndex : db.users.length);
+    db.users.splice(insertAt, 0, requiredUser);
+  }
   db.priceCache = db.priceCache || {};
   db.walletTransactions = db.walletTransactions || [];
   db.walletScans = db.walletScans || [];
   db.priceCache.USDT = { usd: 1, updatedAt: db.priceCache.USDT?.updatedAt || now(), source: "fixed" };
+  const legacyDemoWalletNames = {
+    "w-usdt-trx-071": "FK-1",
+    "w-eth-erc-022": "FK-2",
+    "w-usdt-trx-118": "FK-3",
+    "w-usdt-trx-119": "FK-4",
+    "w-btc-034": "FK-5",
+    "w-eth-erc-188": "FK-6",
+    "w-sol-044": "FK-7",
+    "w-xrp-009": "FK-8"
+  };
   db.wallets.forEach(wallet => {
     wallet.address = String(wallet.address || "").trim();
-    if (wallet.status === "blocked") {
+    if (legacyDemoWalletNames[wallet.id]) wallet.name = legacyDemoWalletNames[wallet.id];
+    const validWalletStatuses = new Set(["free", "reserved", "busy", "frozen", "archived"]);
+    if (!validWalletStatuses.has(wallet.status)) {
       wallet.status = "free";
       wallet.cid = "";
       wallet.exchange = "";
@@ -262,10 +522,26 @@ function normalizeDb(db) {
       wallet.frozenByRequestId = wallet.frozenByRequestId || frozenRequest.id;
     }
   });
+  db.requests.forEach(request => {
+    request.depositUsd = nonNegativeMoney(request.depositUsd || 0);
+    if (request.originalAmount !== undefined && toNumber(request.originalAmount, 0) < 0) request.originalAmount = String(Math.abs(toNumber(request.originalAmount, 0)));
+    if (request.withdrawAddress === undefined) request.withdrawAddress = "";
+  });
+  db.assignments.forEach(assignment => {
+    assignment.depositUsd = nonNegativeMoney(assignment.depositUsd || 0);
+  });
+  const highestFkNumber = db.wallets.reduce((max, wallet) => {
+    const match = String(wallet.name || "").match(/^FK-(\d+)$/i);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  const currentNextWalletNumber = Number(db.settings.nextWalletNumber);
+  if (!Number.isFinite(currentNextWalletNumber) || currentNextWalletNumber <= highestFkNumber || currentNextWalletNumber > 200) {
+    db.settings.nextWalletNumber = Math.max(9, highestFkNumber + 1);
+  }
   db.walletTransactions.forEach(tx => {
-    tx.amountCrypto = roundCrypto(tx.amountCrypto);
-    tx.priceUsdAtTx = roundMoney(tx.priceUsdAtTx);
-    tx.originalUsd = roundMoney(tx.originalUsd);
+    tx.amountCrypto = nonNegativeCrypto(tx.amountCrypto);
+    tx.priceUsdAtTx = nonNegativeMoney(tx.priceUsdAtTx);
+    tx.originalUsd = nonNegativeMoney(tx.originalUsd);
   });
   ensureTransactionsForExistingRequests(db);
   return db;
@@ -297,10 +573,10 @@ function addWalletTransaction(db, wallet, tx) {
   );
   if (existing) return existing;
 
-  const amountCrypto = roundCrypto(tx.amountCrypto);
+  const amountCrypto = nonNegativeCrypto(tx.amountCrypto);
   if (amountCrypto <= 0) return null;
-  const priceUsdAtTx = roundMoney(tx.priceUsdAtTx || livePriceUsd(db, wallet.crypto));
-  const originalUsd = roundMoney(tx.originalUsd || (priceUsdAtTx > 0 ? amountCrypto * priceUsdAtTx : 0));
+  const priceUsdAtTx = nonNegativeMoney(tx.priceUsdAtTx || livePriceUsd(db, wallet.crypto));
+  const originalUsd = nonNegativeMoney(tx.originalUsd || (priceUsdAtTx > 0 ? amountCrypto * priceUsdAtTx : 0));
   const record = {
     id: `tx-${crypto.randomUUID().slice(0, 10)}`,
     walletId: wallet.id,
@@ -324,8 +600,8 @@ function recordTransactionFromRequest(db, request, wallet, stamp = now()) {
   if (isWithdrawType(request.type)) return null;
   const amountCrypto = amountFromRequest(db, request);
   if (amountCrypto <= 0) return null;
-  const originalUsd = roundMoney(request.depositUsd || 0);
-  const priceUsdAtTx = roundMoney(originalUsd / amountCrypto);
+  const originalUsd = nonNegativeMoney(request.depositUsd || 0);
+  const priceUsdAtTx = nonNegativeMoney(originalUsd / amountCrypto);
   return addWalletTransaction(db, wallet, {
     txHash: `request:${request.id}`,
     amountCrypto,
@@ -868,12 +1144,88 @@ function safeUser(user) {
   return rest;
 }
 
+function addressSuffix(address) {
+  const text = String(address || "");
+  return text ? text.slice(-5) : "";
+}
+
+function maskedAddress(address) {
+  const suffix = addressSuffix(address);
+  return suffix ? `...${suffix}` : "";
+}
+
+function ownerSafeWallet(wallet) {
+  return {
+    ...wallet,
+    address: maskedAddress(wallet.address),
+    addressSuffix: addressSuffix(wallet.address)
+  };
+}
+
+function ownerSafeRequest(request) {
+  return {
+    ...request,
+    withdrawAddress: maskedAddress(request.withdrawAddress),
+    withdrawAddressSuffix: addressSuffix(request.withdrawAddress)
+  };
+}
+
+function ownerSafeUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    fullName: user.fullName,
+    role: user.role,
+    team: user.team,
+    monthlyTarget: user.monthlyTarget || 0,
+    active: Boolean(user.active)
+  };
+}
+
+function roomScreenSafeRequest(request) {
+  if (!request) return null;
+  return {
+    id: request.id,
+    status: request.status,
+    date: request.date,
+    agentId: request.agentId,
+    type: request.type,
+    depositUsd: Number(request.depositUsd || 0),
+    room: request.room || "",
+    createdAt: request.createdAt || "",
+    updatedAt: request.updatedAt || ""
+  };
+}
+
 function getUser(db, id) {
   return db.users.find(user => user.id === id);
 }
 
 function getUserByLogin(db, username, password) {
   return db.users.find(user => user.username === username && user.password === password && user.active);
+}
+
+function requestRoom(db, request) {
+  return request?.room || getUser(db, request?.agentId)?.team || "";
+}
+
+function assignmentRoom(db, assignment) {
+  return assignment?.room || getUser(db, assignment?.agentId)?.team || "";
+}
+
+function canAccessRequest(db, user, request) {
+  if (!request || !user) return false;
+  if (user.role === "owner") return true;
+  if (["finance", "admin"].includes(user.role)) return true;
+  if (user.role === "supervisor") return requestRoom(db, request) === user.team;
+  if (user.role === "agent") return request.agentId === user.id || request.createdBy === user.id;
+  return false;
+}
+
+function assertCanAccessRequest(db, user, request, action = "use") {
+  if (!canAccessRequest(db, user, request)) {
+    throw new ApiError(`You can only ${action} requests from your own room.`, 403);
+  }
 }
 
 function canApprove(user) {
@@ -954,14 +1306,17 @@ function checkLowWallets(db, cryptoName, network) {
   else if (count <= threshold) addAlert(db, "warning", `${cryptoName} ${network} low`, `${count} free wallet(s) left for ${cryptoName} ${network}.`, ["finance", "admin"]);
 }
 
-function buildState(db, user) {
-  ensureJournal(db);
+function scopedData(db, user) {
   let requests = db.requests;
   let assignments = db.assignments;
   let wallets = db.wallets;
   let walletTransactions = db.walletTransactions || [];
   let walletScans = db.walletScans || [];
   let audit = db.audit;
+  let users = db.users;
+  let teams = db.teams;
+  let clients = db.clients;
+
   if (user.role === "agent") {
     requests = requests.filter(item => item.agentId === user.id || item.createdBy === user.id);
     assignments = assignments.filter(item => item.agentId === user.id);
@@ -969,63 +1324,137 @@ function buildState(db, user) {
     wallets = wallets.filter(item => walletIds.has(item.id));
     walletTransactions = walletTransactions.filter(item => walletIds.has(item.walletId));
     walletScans = walletScans.filter(item => walletIds.has(item.walletId));
+    users = users.filter(item => item.id === user.id);
+    teams = teams.filter(item => item.name === user.team);
+    const cids = new Set([...requests.map(item => item.cid), ...assignments.map(item => item.cid)].filter(Boolean));
+    clients = clients.filter(item => cids.has(item.cid));
+    audit = [];
+  } else if (user.role === "supervisor") {
+    const room = user.team || "";
+    requests = requests.filter(item => requestRoom(db, item) === room);
+    assignments = assignments.filter(item => assignmentRoom(db, item) === room);
+    const walletIds = new Set([...assignments.map(item => item.walletId), ...requests.map(item => item.walletId)].filter(Boolean));
+    const requestIds = new Set(requests.map(item => item.id));
+    const cids = new Set([...requests.map(item => item.cid), ...assignments.map(item => item.cid)].filter(Boolean));
+    wallets = wallets.filter(item => walletIds.has(item.id));
+    walletTransactions = walletTransactions.filter(item => walletIds.has(item.walletId));
+    walletScans = walletScans.filter(item => walletIds.has(item.walletId));
+    users = users.filter(item => item.id === user.id || (item.role === "agent" && item.team === room));
+    teams = teams.filter(item => item.name === room || item.managerId === user.id);
+    clients = clients.filter(item => cids.has(item.cid));
+    audit = audit.filter(item =>
+      (item.requestId && requestIds.has(item.requestId))
+      || (item.walletId && walletIds.has(item.walletId))
+      || (item.cid && cids.has(item.cid))
+      || item.userId === user.id
+    );
+  } else if (user.role === "room_screen") {
+    const room = user.team || "";
+    requests = requests.filter(item => requestRoom(db, item) === room);
+    users = users.filter(item =>
+      item.id === user.id
+      || (item.role === "agent" && item.team === room)
+      || (item.role === "supervisor" && item.team === room)
+    );
+    teams = teams.filter(item => item.name === room);
+    assignments = [];
+    wallets = [];
+    walletTransactions = [];
+    walletScans = [];
+    clients = [];
+    audit = [];
+  } else if (user.role === "owner") {
+    wallets = wallets.filter(walletIssuedForMonitoring);
+    const walletIds = new Set(wallets.map(item => item.id));
+    const cids = new Set([...requests.map(item => item.cid), ...assignments.map(item => item.cid)].filter(Boolean));
+    walletTransactions = walletTransactions.filter(item => walletIds.has(item.walletId));
+    walletScans = walletScans.filter(item => walletIds.has(item.walletId));
+    users = users.filter(item => ["agent", "supervisor", "owner"].includes(item.role));
+    clients = clients.filter(item => cids.has(item.cid));
     audit = [];
   }
-  const alerts = db.alerts.filter(alert => alert.targetRoles?.includes(user.role) || user.role === "admin");
+  return { requests, assignments, wallets, walletTransactions, walletScans, audit, users, teams, clients };
+}
+
+function buildState(db, user) {
+  ensureJournal(db);
+  const scoped = scopedData(db, user);
+  const ownerRole = user.role === "owner";
+  const roomScreenRole = user.role === "room_screen";
+  const alerts = roomScreenRole ? [] : db.alerts.filter(alert => alert.targetRoles?.includes(user.role) || user.role === "admin");
   return {
     me: safeUser(user),
     settings: db.settings,
-    users: db.users.map(safeUser),
-    teams: db.teams,
-    brands: db.brands,
-    exchanges: db.exchanges,
-    assets: assetCatalog(),
-    wallets,
-    walletTransactions,
-    walletScans,
-    priceCache: db.priceCache || {},
-    assignments,
-    requests,
-    audit,
+    users: (ownerRole || roomScreenRole) ? scoped.users.map(ownerSafeUser) : scoped.users.map(safeUser),
+    teams: scoped.teams,
+    brands: roomScreenRole ? [] : db.brands,
+    exchanges: roomScreenRole ? [] : db.exchanges,
+    assets: roomScreenRole ? [] : assetCatalog(),
+    wallets: ownerRole ? scoped.wallets.map(ownerSafeWallet) : scoped.wallets,
+    walletTransactions: scoped.walletTransactions,
+    walletScans: scoped.walletScans,
+    priceCache: roomScreenRole ? {} : (db.priceCache || {}),
+    assignments: scoped.assignments,
+    requests: ownerRole ? scoped.requests.map(ownerSafeRequest) : (roomScreenRole ? scoped.requests.map(roomScreenSafeRequest) : scoped.requests),
+    audit: scoped.audit,
     alerts,
-    journals: db.journals
+    journals: roomScreenRole ? {} : db.journals
   };
 }
 
 function createRequest(db, body, user, ip) {
+  if (!["agent", "supervisor", "finance", "admin"].includes(user.role)) {
+    throw new ApiError("You do not have request creation permission.", 403);
+  }
   const agentId = user.role === "agent" ? user.id : (body.agentId || user.id);
   const agent = getUser(db, agentId);
   if (!agent || agent.role !== "agent") throw new Error("Request owner must be an active agent.");
+  if (user.role === "supervisor" && agent.team !== user.team) {
+    throw new ApiError("Supervisor can create requests only for agents in their own room.", 403);
+  }
 
   const cid = String(body.cid || "").trim();
   const cryptoName = String(body.crypto || "").trim();
   const network = String(body.network || "").trim();
-  const exchange = String(body.exchange || "").trim();
-  if (!cid || !cryptoName || !network || !exchange) throw new Error("CID, asset and exchange are required.");
-  assertAllowedAsset(cryptoName, network);
   const requestType = String(body.type || "Deposit").trim() || "Deposit";
+  const withdrawRequest = isWithdrawType(requestType);
+  const exchange = withdrawRequest ? "" : String(body.exchange || "").trim();
+  if (!cid || !cryptoName || !network || (!withdrawRequest && !exchange)) {
+    throw new Error(withdrawRequest ? "CID and asset are required." : "CID, asset and exchange are required.");
+  }
+  assertAllowedAsset(cryptoName, network);
   const cryptoAmount = parseOriginalAmount(body.originalAmount);
-  let depositUsd = roundMoney(body.depositUsd || 0);
-  if (isWithdrawType(requestType)) {
+  let depositUsd = nonNegativeMoney(body.depositUsd || 0);
+  const withdrawAddress = cleanWalletAddress(body.withdrawAddress);
+  if (withdrawRequest) {
     if (!assetAllowedForWithdraw(cryptoName)) {
       throw new ApiError("Withdraw requests cannot use USDT. Choose BTC, ETH, SOL or XRP.", 400);
     }
     if (cryptoAmount <= 0) throw new ApiError("Withdraw requests must include the amount in the selected crypto.", 400);
+    if (!withdrawAddress) throw new ApiError("Withdraw requests must include the destination wallet.", 400);
+    const detected = detectWalletAddressAsset(withdrawAddress);
+    if (!detected) throw new ApiError("Destination wallet format cannot be detected.", 400);
+    if (detected.crypto !== cryptoName || detected.network !== network) {
+      throw new ApiError(`Destination wallet looks like ${assetDisplayLabel(detected.crypto, detected.network)}, not ${assetDisplayLabel(cryptoName, network)}.`, 400);
+    }
     const price = livePriceUsd(db, cryptoName);
-    depositUsd = price > 0 ? roundMoney(cryptoAmount * price) : 0;
+    if (price <= 0) throw new ApiError(`Live price is unavailable for ${cryptoName}. Try again after prices refresh.`, 503);
+    depositUsd = nonNegativeMoney(cryptoAmount * price);
+  } else if (depositUsd <= 0) {
+    throw new ApiError("Deposit USD must be greater than 0. Deposits cannot be negative or zero.", 400);
   }
 
   const requestCreatedAt = now();
   const requestId = `REQ-${db.settings.nextRequestNumber}`;
   db.settings.nextRequestNumber = Number(db.settings.nextRequestNumber || 2401) + 1;
-  const existing = findExistingAssignment(db, cid, cryptoName, network, exchange);
+  const existing = withdrawRequest ? null : findExistingAssignment(db, cid, cryptoName, network, exchange);
   let walletId = "";
   let status = "pending";
 
   if (existing) {
     walletId = existing.walletId;
     status = "instant";
-  } else {
+  } else if (!withdrawRequest) {
     const wallet = findFreeWallet(db, cryptoName, network);
     if (!wallet) {
       addAlert(db, "danger", `${cryptoName} ${network} empty`, `Agent ${agent.fullName} requested ${cryptoName} ${network} for CID ${cid}, but no free wallet exists.`, ["finance", "admin"]);
@@ -1053,7 +1482,7 @@ function createRequest(db, body, user, ip) {
     clientName,
     cid,
     brand: body.brand || "",
-    room: body.room || agent.team || "",
+    room: agent.team || "",
     type: requestType,
     keepInWallet: Boolean(body.keepInWallet),
     crypto: cryptoName,
@@ -1061,6 +1490,7 @@ function createRequest(db, body, user, ip) {
     exchange,
     originalAmount: body.originalAmount || "",
     depositUsd,
+    withdrawAddress: isWithdrawType(requestType) ? withdrawAddress : "",
     notes: body.notes || "",
     walletId,
     rejectReason: "",
@@ -1079,17 +1509,30 @@ function createRequest(db, body, user, ip) {
     addAudit(db, user, "wallet_returned_instantly", "Existing wallet returned for CID + crypto + network + exchange.", { cid, walletId, requestId, ip });
   }
   else {
-    addAudit(db, user, "request_created_wallet_reserved", "New request created and wallet reserved for approval.", { cid, walletId, requestId, ip });
-    checkLowWallets(db, cryptoName, network);
+    if (withdrawRequest) {
+      addAudit(db, user, "withdraw_request_created", `Withdraw request created to ${withdrawAddress}.`, { cid, requestId, ip });
+    } else {
+      addAudit(db, user, "request_created_wallet_reserved", "New request created and wallet reserved for approval.", { cid, walletId, requestId, ip });
+      checkLowWallets(db, cryptoName, network);
+    }
   }
   return { ok: true, status, request, wallet };
 }
 
 function approveRequest(db, requestId, user, ip) {
-  if (!canApprove(user)) throw new Error("You do not have approval permission.");
+  if (!canApprove(user)) throw new ApiError("You do not have approval permission.", 403);
   const request = db.requests.find(item => item.id === requestId);
   if (!request) throw new Error("Request not found.");
+  assertCanAccessRequest(db, user, request, "approve");
   if (request.status !== "pending") throw new Error("Only pending requests can be approved.");
+  if (isWithdrawType(request.type)) {
+    const approvedAt = now();
+    request.status = "approved";
+    request.approvedBy = user.id;
+    request.updatedAt = approvedAt;
+    addAudit(db, user, "withdraw_request_approved", `Withdraw approved to ${request.withdrawAddress || "-"}.`, { cid: request.cid, requestId: request.id, ip });
+    return { ok: true, request, wallet: null };
+  }
   const wallet = db.wallets.find(item => item.id === request.walletId);
   if (!wallet || wallet.status !== "reserved" || wallet.requestId !== request.id) throw new Error("Wallet is not reserved for this request.");
 
@@ -1123,10 +1566,11 @@ function approveRequest(db, requestId, user, ip) {
 }
 
 function rejectRequest(db, requestId, reason, user, ip) {
-  if (!canApprove(user)) throw new Error("You do not have rejection permission.");
+  if (!canApprove(user)) throw new ApiError("You do not have rejection permission.", 403);
   if (!reason) throw new Error("Reject reason is required.");
   const request = db.requests.find(item => item.id === requestId);
   if (!request) throw new Error("Request not found.");
+  assertCanAccessRequest(db, user, request, "reject");
   if (request.status !== "pending") throw new Error("Only pending requests can be rejected.");
   const wallet = db.wallets.find(item => item.id === request.walletId);
   if (wallet && wallet.status === "reserved" && wallet.requestId === request.id) {
@@ -1148,6 +1592,7 @@ function changeRequestWallet(db, requestId, user, ip) {
   if (!canApprove(user)) throw new Error("Only supervisor, finance manager or admin can change proposed wallet.");
   const request = db.requests.find(item => item.id === requestId);
   if (!request) throw new Error("Request not found.");
+  assertCanAccessRequest(db, user, request, "change");
   if (request.status !== "pending") throw new Error("Only pending requests can change wallet.");
   const oldWallet = db.wallets.find(item => item.id === request.walletId);
   const newWallet = db.wallets.find(item => item.status === "free" && item.crypto === request.crypto && item.network === request.network && item.id !== request.walletId);
@@ -1174,13 +1619,13 @@ function changeRequestWallet(db, requestId, user, ip) {
 }
 
 function addWallet(db, body, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can add wallets.");
+  if (!canManageWallets(user)) throw new ApiError("Only finance manager or admin can add wallets.", 403);
   const address = String(body.address || "").trim();
   if (!address) throw new Error("Wallet address is required.");
   assertAllowedAsset(String(body.crypto || "").trim(), String(body.network || "").trim());
   const addressKey = walletAddressKey(address);
   if (db.wallets.some(item => walletAddressKey(item.address) === addressKey)) throw new Error("Wallet address already exists.");
-  const name = String(body.name || "").trim() || `${body.crypto}-${body.network}-${db.settings.nextWalletNumber++}`;
+  const name = String(body.name || "").trim() || `FK-${db.settings.nextWalletNumber++}`;
   const wallet = {
     id: `w-${crypto.randomUUID().slice(0, 10)}`,
     name,
@@ -1206,7 +1651,7 @@ function addWallet(db, body, user, ip) {
 }
 
 function bulkAddWallets(db, body, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can add wallets.");
+  if (!canManageWallets(user)) throw new ApiError("Only finance manager or admin can add wallets.", 403);
   const rows = Array.isArray(body.wallets) ? body.wallets : [];
   if (!rows.length) throw new Error("Bulk upload file has no wallet rows.");
 
@@ -1247,7 +1692,7 @@ function bulkAddWallets(db, body, user, ip) {
   });
 
   const added = prepared.map(row => {
-    const name = row.name || `${row.crypto}-${row.network}-${db.settings.nextWalletNumber++}`;
+    const name = row.name || `FK-${db.settings.nextWalletNumber++}`;
     const wallet = {
       id: `w-${crypto.randomUUID().slice(0, 10)}`,
       name,
@@ -1277,7 +1722,7 @@ function bulkAddWallets(db, body, user, ip) {
 }
 
 function archiveWallet(db, walletId, reason, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can archive wallets.");
+  if (!canManageWallets(user)) throw new ApiError("Only finance manager or admin can archive wallets.", 403);
   if (!reason) throw new Error("Archive reason is required.");
   const wallet = db.wallets.find(item => item.id === walletId);
   if (!wallet) throw new Error("Wallet not found.");
@@ -1337,7 +1782,7 @@ async function runWalletScan(db, wallet, user, ip) {
 }
 
 async function scanWallet(db, walletId, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can scan wallets.");
+  if (!canManageWallets(user)) throw new ApiError("Only finance manager or admin can scan wallets.", 403);
   const wallet = db.wallets.find(item => item.id === walletId);
   if (!wallet) throw new Error("Wallet not found.");
   if (!walletIssuedForMonitoring(wallet)) {
@@ -1348,7 +1793,7 @@ async function scanWallet(db, walletId, user, ip) {
 }
 
 async function scanIssuedWallets(db, body, user, ip) {
-  if (!canManageWallets(user)) throw new Error("Only finance manager or admin can scan wallets.");
+  if (!canManageWallets(user)) throw new ApiError("Only finance manager or admin can scan wallets.", 403);
   const force = Boolean(body?.force);
   const issuedWallets = db.wallets.filter(walletIssuedForMonitoring);
   await refreshLivePrices(db);
@@ -1391,14 +1836,14 @@ async function scanIssuedWallets(db, body, user, ip) {
 function clientSearch(db, query, user, ip) {
   query = String(query || "").trim().toLowerCase();
   if (!query) throw new Error("Search query is required.");
-  const walletCidMatches = db.wallets.filter(item => item.address.toLowerCase().includes(query)).map(item => item.cid);
-  const clients = db.clients.filter(item => item.cid.toLowerCase().includes(query) || item.name.toLowerCase().includes(query) || walletCidMatches.includes(item.cid));
+  const scoped = scopedData(db, user);
+  const walletCidMatches = scoped.wallets.filter(item => item.address.toLowerCase().includes(query)).map(item => item.cid);
+  const clients = scoped.clients.filter(item => item.cid.toLowerCase().includes(query) || item.name.toLowerCase().includes(query) || walletCidMatches.includes(item.cid));
   const results = clients.map(client => {
-    const assignments = db.assignments.filter(item => item.cid === client.cid);
+    const assignments = scoped.assignments.filter(item => item.cid === client.cid);
     const walletIds = new Set(assignments.map(item => item.walletId));
-    const wallets = db.wallets.filter(item => walletIds.has(item.id));
-    let history = db.requests.filter(item => item.cid === client.cid);
-    if (user.role === "agent") history = history.filter(item => item.agentId === user.id || item.createdBy === user.id);
+    const wallets = scoped.wallets.filter(item => walletIds.has(item.id));
+    const history = scoped.requests.filter(item => item.cid === client.cid);
     return {
       client,
       wallets,
@@ -1413,7 +1858,7 @@ function clientSearch(db, query, user, ip) {
 }
 
 function addUser(db, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage users.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage users.", 403);
   const username = String(body.username || "").trim().toLowerCase();
   if (!username) throw new Error("Username is required.");
   if (db.users.some(item => item.username === username)) throw new Error("Username already exists.");
@@ -1424,7 +1869,7 @@ function addUser(db, body, user, ip) {
     fullName: body.fullName || username,
     role: body.role || "agent",
     team: body.team || "M",
-    active: true,
+    active: body.active !== undefined ? Boolean(body.active) : true,
     monthlyTarget: Number(body.monthlyTarget || 0),
     brandAccess: ["All"]
   };
@@ -1434,7 +1879,7 @@ function addUser(db, body, user, ip) {
 }
 
 function updateUser(db, userId, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage users.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage users.", 403);
   const target = getUser(db, userId);
   if (!target) throw new Error("User not found.");
   const before = { ...target };
@@ -1456,7 +1901,7 @@ function updateUser(db, userId, body, user, ip) {
 }
 
 function deactivateUser(db, userId, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can remove users.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can remove users.", 403);
   const target = getUser(db, userId);
   if (!target) throw new Error("User not found.");
   if (target.id === user.id) throw new Error("You cannot remove your own active account.");
@@ -1468,7 +1913,7 @@ function deactivateUser(db, userId, user, ip) {
 }
 
 function updateTeam(db, teamId, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage rooms.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage rooms.", 403);
   const team = db.teams.find(item => item.id === teamId);
   if (!team) throw new Error("Room not found.");
   if (body.name !== undefined) team.name = String(body.name || "").trim() || team.name;
@@ -1484,7 +1929,7 @@ function updateTeam(db, teamId, body, user, ip) {
 }
 
 function addBrand(db, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage brands.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage brands.", 403);
   const name = String(body.name || "").trim();
   if (!name) throw new Error("Brand name is required.");
   if (db.brands.some(item => item.name.toLowerCase() === name.toLowerCase())) throw new Error("Brand already exists.");
@@ -1495,7 +1940,7 @@ function addBrand(db, body, user, ip) {
 }
 
 function updateBrand(db, brandId, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage brands.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage brands.", 403);
   const brand = db.brands.find(item => item.id === brandId);
   if (!brand) throw new Error("Brand not found.");
   if (body.name !== undefined) brand.name = String(body.name || "").trim() || brand.name;
@@ -1505,7 +1950,7 @@ function updateBrand(db, brandId, body, user, ip) {
 }
 
 function addExchange(db, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage exchanges.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage exchanges.", 403);
   const name = String(body.name || "").trim();
   if (!name) throw new Error("Exchange name is required.");
   if (db.exchanges.some(item => item.name.toLowerCase() === name.toLowerCase())) throw new Error("Exchange already exists.");
@@ -1516,7 +1961,7 @@ function addExchange(db, body, user, ip) {
 }
 
 function updateExchange(db, exchangeId, body, user, ip) {
-  if (!canManagePeople(user)) throw new Error("Only finance manager or admin can manage exchanges.");
+  if (!canManagePeople(user)) throw new ApiError("Only finance manager or admin can manage exchanges.", 403);
   const exchange = db.exchanges.find(item => item.id === exchangeId);
   if (!exchange) throw new Error("Exchange not found.");
   if (body.name !== undefined) exchange.name = String(body.name || "").trim() || exchange.name;
@@ -1526,7 +1971,7 @@ function updateExchange(db, exchangeId, body, user, ip) {
 }
 
 function updateSettings(db, body, user, ip) {
-  if (user.role !== "admin") throw new Error("Only admin can change system settings.");
+  if (user.role !== "admin") throw new ApiError("Only admin can change system settings.", 403);
   if (body.lowWalletWarningAt !== undefined) db.settings.lowWalletWarningAt = Number(body.lowWalletWarningAt || 0);
   if (body.backupEveryMinutes !== undefined) db.settings.backupEveryMinutes = Number(body.backupEveryMinutes || 60);
   if (body.priceCacheTtlSeconds !== undefined) db.settings.priceCacheTtlSeconds = Number(body.priceCacheTtlSeconds || 60);
@@ -1538,7 +1983,7 @@ function updateSettings(db, body, user, ip) {
 }
 
 function updateSecurity(db, body, user, ip) {
-  if (!canManageSecurity(user)) throw new Error("Only admin can change security settings.");
+  if (!canManageSecurity(user)) throw new ApiError("Only admin can change security settings.", 403);
   if (body.ipWhitelistEnabled !== undefined) db.settings.ipWhitelistEnabled = Boolean(body.ipWhitelistEnabled);
   if (body.allowedIps !== undefined) db.settings.allowedIps = body.allowedIps;
   addAudit(db, user, "security_settings_updated", "IP whitelist settings updated.", { ip });
@@ -1546,7 +1991,7 @@ function updateSecurity(db, body, user, ip) {
 }
 
 function resetDemo(db, user, ip) {
-  if (user.role !== "admin") throw new Error("Only admin can reset demo data.");
+  if (user.role !== "admin") throw new ApiError("Only admin can reset demo data.", 403);
   const fresh = normalizeDb(defaultDb());
   addAudit(fresh, user, "demo_reset", "Demo data reset.", { ip });
   Object.keys(db).forEach(key => delete db[key]);
